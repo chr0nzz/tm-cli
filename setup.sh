@@ -350,6 +350,7 @@ gather_tls_method() {
     "Let's Encrypt - DNS challenge: DigitalOcean" \
     "Let's Encrypt - DNS challenge: Namecheap" \
     "Let's Encrypt - DNS challenge: DuckDNS" \
+    "Let's Encrypt - DNS challenge: deSEC" \
     "No TLS (HTTP only)"
 
   DNS_ENV_BLOCK=""
@@ -367,8 +368,8 @@ gather_tls_method() {
     *"Cloudflare"*)
       TLS_TYPE="dns"; CERT_RESOLVER="letsencrypt"; TRAEFIK_ENTRYPOINT="websecure"
       DNS_PROVIDER="cloudflare"
-      ask "Cloudflare API Token" "" CF_API_TOKEN
-      DNS_ENV_BLOCK="      - CF_API_TOKEN=${CF_API_TOKEN}"
+      ask "Cloudflare API Token (DNS-scoped token)" "" CF_DNS_API_TOKEN
+      DNS_ENV_BLOCK="      - CF_DNS_API_TOKEN=${CF_DNS_API_TOKEN}"
       ;;
     *"Route 53"*)
       TLS_TYPE="dns"; CERT_RESOLVER="letsencrypt"; TRAEFIK_ENTRYPOINT="websecure"
@@ -399,6 +400,12 @@ gather_tls_method() {
       DNS_PROVIDER="duckdns"
       ask "DuckDNS Token" "" DUCKDNS_TOKEN
       DNS_ENV_BLOCK="      - DUCKDNS_TOKEN=${DUCKDNS_TOKEN}"
+      ;;
+    *"deSEC"*)
+      TLS_TYPE="dns"; CERT_RESOLVER="letsencrypt"; TRAEFIK_ENTRYPOINT="websecure"
+      DNS_PROVIDER="desec"
+      ask "deSEC Token" "" DESEC_TOKEN
+      DNS_ENV_BLOCK="      - DESEC_TOKEN=${DESEC_TOKEN}"
       ;;
     "No TLS"*)
       TLS_TYPE="none"; CERT_RESOLVER=""; TRAEFIK_ENTRYPOINT="web"
