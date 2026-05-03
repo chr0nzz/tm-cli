@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_VERSION="1.0.0-beta1.1"
+
 BOLD="\033[1m"
 DIM="\033[2m"
 GREEN="\033[32m"
@@ -13,6 +15,13 @@ INSTALL_DIR="${HOME}/traefik-stack"
 COMPOSE_CMD=""
 INSTALL_MODE=""
 DEPLOY_METHOD=""
+RESTART_METHOD=""
+TRAEFIK_CONTAINER="traefik"
+TRAEFIK_SYSTEMD="false"
+TRAEFIK_SERVICE_NAME="traefik"
+MOUNT_STATIC_CONFIG="false"
+TRAEFIK_YML_HOST_PATH=""
+SIGNAL_FILE_PATH="/signals/restart.sig"
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -26,13 +35,13 @@ print_banner() {
   echo "     ██║   ██║  ██║██║  ██║███████╗██║     ██║██║  ██╗"
   echo "     ╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝╚═╝     ╚═╝╚═╝  ╚═╝"
   echo ""
-  echo "                        ◉"
-  echo "                        │"
-  echo "                    ╔═══════╗"
-  echo "              ◉ ─── ╠       ╣ ─── ◉"
-  echo "                    ╚═══════╝"
-  echo "                        │"
-  echo "                        ◉"
+  echo "                       ◉"
+  echo "                       │"
+  echo "                    ╔═════╗"
+  echo "              ◉ ─── ╠     ╣ ─── ◉"
+  echo "                    ╚═════╝"
+  echo "                       │"
+  echo "                       ◉"
   echo -e "${RESET}"
   echo -e "  ${DIM}+ Traefik Manager - Interactive Setup${RESET}"
   echo ""
@@ -224,6 +233,31 @@ gather_mode() {
   fi
 }
 
+# ─── Restart method gathering (Docker) ────────────────────────────────────────
+
+gather_restart_method_docker() {
+  local ask_container="${1:-false}"
+  sep
+  echo ""
+  echo -e "  ${BOLD}-- Static Config Editor --${RESET}"
+  info "TM can restart Traefik automatically when you save static config changes."
+  local choice
+  ask_choice "How should TM restart Traefik?" choice \
+    "Docker socket proxy (recommended - one extra container, minimal socket exposure)" \
+    "Poison pill (no extra container - adds a healthcheck to Traefik compose)" \
+    "Direct Docker socket (simplest - full Docker access, higher risk)"
+  case "$choice" in
+    "Docker socket proxy"*)  RESTART_METHOD="proxy" ;;
+    "Poison pill"*)          RESTART_METHOD="poison-pill" ;;
+    "Direct Docker socket"*) RESTART_METHOD="socket" ;;
+  esac
+  if [[ "$ask_container" == "true" ]]; then
+    ask "Traefik container name" "traefik" TRAEFIK_CONTAINER
+  else
+    TRAEFIK_CONTAINER="traefik"
+  fi
+}
+
 # ─── Full stack config ────────────────────────────────────────────────────────
 
 gather_full_stack() {
@@ -269,9 +303,13 @@ gather_full_stack() {
   echo ""
   echo -e "  ${BOLD}-- Optional Mounts --${RESET}"
   info "Expose extra Traefik data to Traefik Manager for richer visibility."
-  ask_yn "Mount access logs?"           "y" MOUNT_ACCESS_LOGS
-  ask_yn "Mount SSL certs (acme.json)?" "y" MOUNT_CERTS
-  ask_yn "Mount plugins directory?"     "n" MOUNT_PLUGINS
+  ask_yn "Mount access logs?"                        "y" MOUNT_ACCESS_LOGS
+  ask_yn "Mount SSL certs (acme.json)?"              "y" MOUNT_CERTS
+  ask_yn "Mount Traefik static config (traefik.yml)?" "n" MOUNT_STATIC_CONFIG
+
+  if [[ "$MOUNT_STATIC_CONFIG" == "true" ]]; then
+    gather_restart_method_docker "false"
+  fi
 
   sep
   echo ""
@@ -312,6 +350,7 @@ gather_tls_method() {
     "Let's Encrypt - DNS challenge: DigitalOcean" \
     "Let's Encrypt - DNS challenge: Namecheap" \
     "Let's Encrypt - DNS challenge: DuckDNS" \
+    "Let's Encrypt - DNS challenge: deSEC" \
     "No TLS (HTTP only)"
 
   DNS_ENV_BLOCK=""
@@ -329,8 +368,8 @@ gather_tls_method() {
     *"Cloudflare"*)
       TLS_TYPE="dns"; CERT_RESOLVER="letsencrypt"; TRAEFIK_ENTRYPOINT="websecure"
       DNS_PROVIDER="cloudflare"
-      ask "Cloudflare API Token" "" CF_API_TOKEN
-      DNS_ENV_BLOCK="      - CF_API_TOKEN=${CF_API_TOKEN}"
+      ask "Cloudflare API Token (DNS-scoped token)" "" CF_DNS_API_TOKEN
+      DNS_ENV_BLOCK="      - CF_DNS_API_TOKEN=${CF_DNS_API_TOKEN}"
       ;;
     *"Route 53"*)
       TLS_TYPE="dns"; CERT_RESOLVER="letsencrypt"; TRAEFIK_ENTRYPOINT="websecure"
@@ -361,6 +400,12 @@ gather_tls_method() {
       DNS_PROVIDER="duckdns"
       ask "DuckDNS Token" "" DUCKDNS_TOKEN
       DNS_ENV_BLOCK="      - DUCKDNS_TOKEN=${DUCKDNS_TOKEN}"
+      ;;
+    *"deSEC"*)
+      TLS_TYPE="dns"; CERT_RESOLVER="letsencrypt"; TRAEFIK_ENTRYPOINT="websecure"
+      DNS_PROVIDER="desec"
+      ask "deSEC Token" "" DESEC_TOKEN
+      DNS_ENV_BLOCK="      - DESEC_TOKEN=${DESEC_TOKEN}"
       ;;
     "No TLS"*)
       TLS_TYPE="none"; CERT_RESOLVER=""; TRAEFIK_ENTRYPOINT="web"
@@ -425,9 +470,10 @@ gather_tm_docker() {
   if [[ "$MOUNT_CERTS" == "true" ]]; then
     ask "Path to acme.json" "/etc/traefik/acme.json" ACME_JSON_HOST_PATH
   fi
-  ask_yn "Mount Traefik static config (traefik.yml)?" "n" MOUNT_PLUGINS
-  if [[ "$MOUNT_PLUGINS" == "true" ]]; then
+  ask_yn "Mount Traefik static config (traefik.yml)?" "n" MOUNT_STATIC_CONFIG
+  if [[ "$MOUNT_STATIC_CONFIG" == "true" ]]; then
     ask "Path to traefik.yml" "/etc/traefik/traefik.yml" TRAEFIK_YML_HOST_PATH
+    gather_restart_method_docker "true"
   fi
 }
 
@@ -472,9 +518,38 @@ gather_tm_native() {
   if [[ "$MOUNT_ACCESS_LOGS" == "true" ]]; then
     ask "Path to Traefik access log" "/var/log/traefik/access.log" ACCESS_LOG_PATH
   fi
-  ask_yn "Mount Traefik static config (traefik.yml)?" "n" MOUNT_PLUGINS
-  if [[ "$MOUNT_PLUGINS" == "true" ]]; then
+  ask_yn "Mount Traefik static config (traefik.yml)?" "n" MOUNT_STATIC_CONFIG
+  if [[ "$MOUNT_STATIC_CONFIG" == "true" ]]; then
     ask "Path to traefik.yml" "/etc/traefik/traefik.yml" TRAEFIK_YML_HOST_PATH
+    sep
+    echo ""
+    echo -e "  ${BOLD}-- Static Config Editor --${RESET}"
+    local traefik_deploy_choice
+    ask_choice "How is Traefik running on this server?" traefik_deploy_choice \
+      "Docker" \
+      "Linux service (systemd)"
+    if [[ "$traefik_deploy_choice" == "Linux service"* ]]; then
+      TRAEFIK_SYSTEMD="true"
+      RESTART_METHOD="poison-pill"
+      ask "Traefik service name" "traefik" TRAEFIK_SERVICE_NAME
+      ask "Signal file path" "/var/lib/traefik-manager/signals/restart.sig" SIGNAL_FILE_PATH
+    else
+      info "Choose how TM should restart Traefik after saving static config changes."
+      local choice
+      ask_choice "Restart method" choice \
+        "Poison pill (recommended - signal file, no Docker socket needed)" \
+        "Direct Docker socket (requires TM user to have Docker group access)"
+      case "$choice" in
+        "Poison pill"*)          RESTART_METHOD="poison-pill" ;;
+        "Direct Docker socket"*) RESTART_METHOD="socket" ;;
+      esac
+      if [[ "$RESTART_METHOD" == "socket" ]]; then
+        ask "Traefik container name" "traefik" TRAEFIK_CONTAINER
+      fi
+      if [[ "$RESTART_METHOD" == "poison-pill" ]]; then
+        ask "Signal file path" "/var/lib/traefik-manager/signals/restart.sig" SIGNAL_FILE_PATH
+      fi
+    fi
   fi
 }
 
@@ -624,9 +699,29 @@ ${DNS_ENV_BLOCK}"
       - ./traefik/config:/etc/traefik/config:ro"
   fi
 
-  local tm_vols="      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - ./traefik-manager/config:/app/config
+  local traefik_healthcheck=""
+  local traefik_static_labels=""
+  if [[ "$MOUNT_STATIC_CONFIG" == "true" ]]; then
+    traefik_static_labels='      - "traefik-manager.role=traefik"
+      - "traefik-manager.static-config=/app/traefik.yml"
+      - "traefik-manager.restart-method='"${RESTART_METHOD}"'"'
+    if [[ "$RESTART_METHOD" == "poison-pill" ]]; then
+      traefik_vols+="
+      - tm-signals:/signals"
+      traefik_healthcheck='    healthcheck:
+      test: ["CMD-SHELL", "[ ! -f /signals/restart.sig ] || (rm /signals/restart.sig && kill -TERM 1)"]
+      interval: 5s
+      timeout: 3s
+      retries: 1'
+    fi
+  fi
+
+  local tm_vols="      - ./traefik-manager/config:/app/config
       - ./traefik-manager/backups:/app/backups"
+  if [[ "$MOUNT_STATIC_CONFIG" != "true" || "$RESTART_METHOD" != "proxy" ]]; then
+    tm_vols="      - /var/run/docker.sock:/var/run/docker.sock:ro
+${tm_vols}"
+  fi
   if [[ "$MOUNT_ACCESS_LOGS" == "true" ]]; then
     tm_vols+="
       - ./traefik/logs:/app/logs:ro"
@@ -635,9 +730,13 @@ ${DNS_ENV_BLOCK}"
     tm_vols+="
       - ./traefik/acme.json:/app/acme.json:ro"
   fi
-  if [[ "$MOUNT_PLUGINS" == "true" ]]; then
+  if [[ "$MOUNT_STATIC_CONFIG" == "true" ]]; then
     tm_vols+="
-      - ./traefik/traefik.yml:/app/traefik.yml:ro"
+      - ./traefik/traefik.yml:/app/traefik.yml"
+    if [[ "$RESTART_METHOD" == "poison-pill" ]]; then
+      tm_vols+="
+      - tm-signals:/signals"
+    fi
   fi
   if [[ "$CONFIG_LAYOUT" == "Single file"* ]]; then
     tm_vols+="
@@ -647,18 +746,68 @@ ${DNS_ENV_BLOCK}"
       - ./traefik/config:/app/config/dynamic"
   fi
 
+  local tm_networks="      - ${DOCKER_NETWORK}"
+  if [[ "$MOUNT_STATIC_CONFIG" == "true" && "$RESTART_METHOD" == "proxy" ]]; then
+    tm_networks+="
+      - socket-proxy-net"
+  fi
+
+  local static_env=""
+  if [[ "$MOUNT_STATIC_CONFIG" == "true" ]]; then
+    static_env="      - STATIC_CONFIG_PATH=/app/traefik.yml
+      - RESTART_METHOD=${RESTART_METHOD}
+      - TRAEFIK_CONTAINER=${TRAEFIK_CONTAINER}"
+    if [[ "$RESTART_METHOD" == "proxy" ]]; then
+      static_env+="
+      - DOCKER_HOST=tcp://socket-proxy:2375"
+    elif [[ "$RESTART_METHOD" == "poison-pill" ]]; then
+      static_env+="
+      - SIGNAL_FILE_PATH=/signals/restart.sig"
+    fi
+  fi
+
   local cookie_secure="false"
   [[ "$TLS_TYPE" != "none" ]] && cookie_secure="true"
 
   local port_443=""
   [[ "$TLS_TYPE" != "none" ]] && port_443='      - "443:443"'
 
+  local socket_proxy_service=""
+  if [[ "$MOUNT_STATIC_CONFIG" == "true" && "$RESTART_METHOD" == "proxy" ]]; then
+    socket_proxy_service="
+  socket-proxy:
+    image: tecnativa/docker-socket-proxy
+    container_name: socket-proxy
+    restart: unless-stopped
+    networks:
+      - socket-proxy-net
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      CONTAINERS: 1
+      POST: 1"
+  fi
+
+  local extra_networks=""
+  if [[ "$MOUNT_STATIC_CONFIG" == "true" && "$RESTART_METHOD" == "proxy" ]]; then
+    extra_networks="  socket-proxy-net:
+    internal: true"
+  fi
+
+  local volumes_section=""
+  if [[ "$MOUNT_STATIC_CONFIG" == "true" && "$RESTART_METHOD" == "poison-pill" ]]; then
+    volumes_section="
+volumes:
+  tm-signals:"
+  fi
+
   cat > "${INSTALL_DIR}/docker-compose.yml" <<EOF
 networks:
   ${DOCKER_NETWORK}:
     external: false
     name: ${DOCKER_NETWORK}
-
+$(if [[ -n "$extra_networks" ]]; then echo "$extra_networks"; fi)
+$(if [[ -n "$volumes_section" ]]; then echo "$volumes_section"; fi)
 services:
 
   traefik:
@@ -674,24 +823,27 @@ $(if [[ -n "$port_443" ]]; then echo "$port_443"; fi)
     volumes:
 ${traefik_vols}
 $(if [[ -n "$traefik_env" ]]; then echo "$traefik_env"; fi)
+$(if [[ -n "$traefik_healthcheck" ]]; then echo "$traefik_healthcheck"; fi)
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.dashboard.rule=Host(\`${TRAEFIK_DASHBOARD_HOST}\`)"
       - "traefik.http.routers.dashboard.entrypoints=${TRAEFIK_ENTRYPOINT}"
       - "traefik.http.routers.dashboard.service=api@internal"
 $(if [[ -n "$tls_label_traefik" ]]; then echo "$tls_label_traefik"; fi)
+$(if [[ -n "$traefik_static_labels" ]]; then echo "$traefik_static_labels"; fi)
 
   traefik-manager:
     image: ghcr.io/chr0nzz/traefik-manager:latest
     container_name: traefik-manager
     restart: unless-stopped
     networks:
-      - ${DOCKER_NETWORK}
+${tm_networks}
     volumes:
 ${tm_vols}
     environment:
       - COOKIE_SECURE=${cookie_secure}
 $(if [[ "$CONFIG_LAYOUT" == "Directory"* ]]; then echo "      - CONFIG_DIR=/app/config/dynamic"; fi)
+$(if [[ -n "$static_env" ]]; then echo "$static_env"; fi)
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.traefik-manager.rule=Host(\`${TM_HOST}\`)"
@@ -700,6 +852,7 @@ $(if [[ "$CONFIG_LAYOUT" == "Directory"* ]]; then echo "      - CONFIG_DIR=/app/
 $(if [[ -n "$tls_label_tm" ]]; then echo "$tls_label_tm"; fi)
     depends_on:
       - traefik
+$(if [[ -n "$socket_proxy_service" ]]; then echo "$socket_proxy_service"; fi)
 EOF
   ok "docker-compose.yml written"
 }
@@ -720,10 +873,12 @@ build_compose_tm() {
   local cookie_secure="false"
   [[ "${TLS_TYPE:-none}" != "none" ]] && cookie_secure="true"
 
-  local tm_vols="      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - ./config:/app/config
+  local tm_vols="      - ./config:/app/config
       - ./backups:/app/backups"
-
+  if [[ "$MOUNT_STATIC_CONFIG" != "true" || "$RESTART_METHOD" != "proxy" ]]; then
+    tm_vols="      - /var/run/docker.sock:/var/run/docker.sock:ro
+${tm_vols}"
+  fi
   if [[ "${MOUNT_ACCESS_LOGS:-false}" == "true" ]]; then
     tm_vols+="
       - ${ACCESS_LOG_PATH}:/app/logs/access.log:ro"
@@ -732,9 +887,13 @@ build_compose_tm() {
     tm_vols+="
       - ${ACME_JSON_HOST_PATH}:/app/acme.json:ro"
   fi
-  if [[ "${MOUNT_PLUGINS:-false}" == "true" ]]; then
+  if [[ "$MOUNT_STATIC_CONFIG" == "true" ]]; then
     tm_vols+="
-      - ${TRAEFIK_YML_HOST_PATH}:/app/traefik.yml:ro"
+      - ${TRAEFIK_YML_HOST_PATH}:/app/traefik.yml"
+    if [[ "$RESTART_METHOD" == "poison-pill" ]]; then
+      tm_vols+="
+      - tm-signals:/signals"
+    fi
   fi
   if [[ "$CONFIG_LAYOUT" == "Single file"* ]]; then
     tm_vols+="
@@ -742,6 +901,26 @@ build_compose_tm() {
   else
     tm_vols+="
       - ./config:/app/config/dynamic"
+  fi
+
+  local tm_networks="      - ${DOCKER_NETWORK}"
+  if [[ "$MOUNT_STATIC_CONFIG" == "true" && "$RESTART_METHOD" == "proxy" ]]; then
+    tm_networks+="
+      - socket-proxy-net"
+  fi
+
+  local static_env=""
+  if [[ "$MOUNT_STATIC_CONFIG" == "true" ]]; then
+    static_env="      - STATIC_CONFIG_PATH=/app/traefik.yml
+      - RESTART_METHOD=${RESTART_METHOD}
+      - TRAEFIK_CONTAINER=${TRAEFIK_CONTAINER}"
+    if [[ "$RESTART_METHOD" == "proxy" ]]; then
+      static_env+="
+      - DOCKER_HOST=tcp://socket-proxy:2375"
+    elif [[ "$RESTART_METHOD" == "poison-pill" ]]; then
+      static_env+="
+      - SIGNAL_FILE_PATH=/signals/restart.sig"
+    fi
   fi
 
   local ports_block=""
@@ -774,27 +953,57 @@ $(if [[ -n "$tls_label" ]]; then echo "$tls_label"; fi)"
     external: false
     name: ${DOCKER_NETWORK}"
   fi
+  if [[ "$MOUNT_STATIC_CONFIG" == "true" && "$RESTART_METHOD" == "proxy" ]]; then
+    network_def+="
+  socket-proxy-net:
+    internal: true"
+  fi
+
+  local volumes_section=""
+  if [[ "$MOUNT_STATIC_CONFIG" == "true" && "$RESTART_METHOD" == "poison-pill" ]]; then
+    volumes_section="
+volumes:
+  tm-signals:"
+  fi
+
+  local socket_proxy_service=""
+  if [[ "$MOUNT_STATIC_CONFIG" == "true" && "$RESTART_METHOD" == "proxy" ]]; then
+    socket_proxy_service="
+  socket-proxy:
+    image: tecnativa/docker-socket-proxy
+    container_name: socket-proxy
+    restart: unless-stopped
+    networks:
+      - socket-proxy-net
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      CONTAINERS: 1
+      POST: 1"
+  fi
 
   local config_dir_env=""
   [[ "$CONFIG_LAYOUT" == "Directory"* ]] && config_dir_env="      - CONFIG_DIR=/app/config/dynamic"
 
   cat > "${INSTALL_DIR}/docker-compose.yml" <<EOF
 ${network_def}
-
+$(if [[ -n "$volumes_section" ]]; then echo "$volumes_section"; fi)
 services:
   traefik-manager:
     image: ghcr.io/chr0nzz/traefik-manager:latest
     container_name: traefik-manager
     restart: unless-stopped
     networks:
-      - ${DOCKER_NETWORK}
+${tm_networks}
 ${ports_block}
     volumes:
 ${tm_vols}
     environment:
       - COOKIE_SECURE=${cookie_secure}
 ${config_dir_env}
+$(if [[ -n "$static_env" ]]; then echo "$static_env"; fi)
 ${labels_block}
+$(if [[ -n "$socket_proxy_service" ]]; then echo "$socket_proxy_service"; fi)
 EOF
   ok "docker-compose.yml written"
 }
@@ -808,7 +1017,7 @@ install_tm_native() {
     warn "${NATIVE_INSTALL_DIR} already exists. Pulling latest changes."
     git -C "${NATIVE_INSTALL_DIR}" pull
   else
-    git clone https://github.com/chr0nzz/traefik-manager.git "${NATIVE_INSTALL_DIR}"
+    git clone --branch v1 https://github.com/chr0nzz/traefik-manager.git "${NATIVE_INSTALL_DIR}"
   fi
   ok "Repository cloned to ${NATIVE_INSTALL_DIR}"
 
@@ -819,6 +1028,12 @@ install_tm_native() {
   mkdir -p "${NATIVE_DATA_DIR}/backups"
   ok "Data directories created at ${NATIVE_DATA_DIR}"
 
+  if [[ "$MOUNT_STATIC_CONFIG" == "true" && "$RESTART_METHOD" == "poison-pill" ]]; then
+    local signal_dir="${SIGNAL_FILE_PATH%/*}"
+    mkdir -p "$signal_dir"
+    ok "Signal directory created at ${signal_dir}"
+  fi
+
   if [[ "$CREATE_SVC_USER" == "true" ]]; then
     if ! id traefik-manager &>/dev/null; then
       sudo useradd --system --no-create-home --shell /usr/sbin/nologin traefik-manager
@@ -828,6 +1043,12 @@ install_tm_native() {
     fi
     sudo chown -R traefik-manager: "${NATIVE_INSTALL_DIR}"
     sudo chown -R traefik-manager: "${NATIVE_DATA_DIR}"
+    if [[ "$MOUNT_STATIC_CONFIG" == "true" && "$RESTART_METHOD" == "poison-pill" ]]; then
+      sudo chown -R traefik-manager: "${SIGNAL_FILE_PATH%/*}"
+    fi
+    if [[ "$MOUNT_STATIC_CONFIG" == "true" && "$RESTART_METHOD" == "socket" ]]; then
+      sudo usermod -aG docker traefik-manager || true
+    fi
     SVC_USER="traefik-manager"
   else
     SVC_USER="${USER}"
@@ -849,9 +1070,42 @@ install_tm_native() {
     optional_env+="Environment=ACCESS_LOG_PATH=${ACCESS_LOG_PATH}
 "
   fi
-  if [[ "${MOUNT_PLUGINS:-false}" == "true" ]]; then
+  if [[ "$MOUNT_STATIC_CONFIG" == "true" ]]; then
     optional_env+="Environment=STATIC_CONFIG_PATH=${TRAEFIK_YML_HOST_PATH}
+Environment=RESTART_METHOD=${RESTART_METHOD}
 "
+    if [[ "$RESTART_METHOD" == "socket" ]]; then
+      optional_env+="Environment=TRAEFIK_CONTAINER=${TRAEFIK_CONTAINER}
+"
+    fi
+    if [[ "$RESTART_METHOD" == "poison-pill" ]]; then
+      optional_env+="Environment=SIGNAL_FILE_PATH=${SIGNAL_FILE_PATH}
+"
+    fi
+  fi
+
+  if [[ "$MOUNT_STATIC_CONFIG" == "true" && "$TRAEFIK_SYSTEMD" == "true" ]]; then
+    sudo tee /etc/systemd/system/traefik-restart.path > /dev/null <<EOF
+[Unit]
+Description=Watch for Traefik Manager restart signal
+
+[Path]
+PathExists=${SIGNAL_FILE_PATH}
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    sudo tee /etc/systemd/system/traefik-restart.service > /dev/null <<EOF
+[Unit]
+Description=Restart Traefik on signal from Traefik Manager
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'rm -f ${SIGNAL_FILE_PATH} && systemctl restart ${TRAEFIK_SERVICE_NAME}'
+EOF
+    sudo systemctl daemon-reload
+    sudo systemctl enable --now traefik-restart.path
+    ok "Traefik restart watcher enabled (traefik-restart.path)"
   fi
 
   sudo tee /etc/systemd/system/traefik-manager.service > /dev/null <<EOF
@@ -947,6 +1201,38 @@ fetch_password_native() {
 
 # ─── Summaries ────────────────────────────────────────────────────────────────
 
+print_static_config_summary() {
+  if [[ "$MOUNT_STATIC_CONFIG" != "true" ]]; then return; fi
+  echo ""
+  echo -e "  ${CYAN}${BOLD}Static Config Editor${RESET}"
+  case "$RESTART_METHOD" in
+    proxy)
+      echo -e "  ${DIM}Restart method  socket proxy (tecnativa/docker-socket-proxy)${RESET}"
+      echo -e "  ${DIM}The socket-proxy service is running alongside TM with minimal permissions.${RESET}"
+      ;;
+    poison-pill)
+      echo -e "  ${DIM}Restart method  poison pill (signal file)${RESET}"
+      if [[ "$TRAEFIK_SYSTEMD" == "true" ]]; then
+        echo -e "  ${DIM}Traefik running as systemd service: ${TRAEFIK_SERVICE_NAME}${RESET}"
+        echo -e "  ${DIM}traefik-restart.path watcher is active - restarts ${TRAEFIK_SERVICE_NAME} when TM writes the signal file.${RESET}"
+      else
+        echo -e "  ${YELLOW}⚠${RESET}  ${DIM}Add this healthcheck to your Traefik service if not already set:${RESET}"
+        echo ""
+        echo -e "    ${DIM}healthcheck:${RESET}"
+        echo -e "    ${DIM}  test: [\"CMD-SHELL\", \"[ ! -f /signals/restart.sig ] || (rm /signals/restart.sig && kill -TERM 1)\"]${RESET}"
+        echo -e "    ${DIM}  interval: 5s${RESET}"
+        echo -e "    ${DIM}  timeout: 3s${RESET}"
+        echo -e "    ${DIM}  retries: 1${RESET}"
+        echo ""
+      fi
+      ;;
+    socket)
+      echo -e "  ${DIM}Restart method  direct Docker socket${RESET}"
+      warn "Full Docker socket is mounted in TM. Keep TM behind authentication."
+      ;;
+  esac
+}
+
 print_summary_full() {
   local scheme="http"
   [[ "$TLS_TYPE" != "none" ]] && scheme="https"
@@ -971,6 +1257,7 @@ print_summary_full() {
   else
     echo -e "  ${DIM}Dynamic config  ${INSTALL_DIR}/traefik/config/*.yml${RESET}"
   fi
+  print_static_config_summary
   echo ""
   echo -e "  ${DIM}cd ${INSTALL_DIR}${RESET}"
   echo -e "  ${DIM}${COMPOSE_CMD} logs -f traefik-manager${RESET}"
@@ -1010,6 +1297,7 @@ print_summary_tm_docker() {
     echo -e "  ${YELLOW}Temporary password  run: docker logs traefik-manager${RESET}"
   fi
   echo -e "  Install dir         ${DIM}${INSTALL_DIR}${RESET}"
+  print_static_config_summary
   echo ""
   echo -e "  ${DIM}cd ${INSTALL_DIR}${RESET}"
   echo -e "  ${DIM}${COMPOSE_CMD} logs -f traefik-manager${RESET}"
@@ -1034,6 +1322,7 @@ print_summary_native() {
   fi
   echo -e "  Install dir         ${DIM}${NATIVE_INSTALL_DIR}${RESET}"
   echo -e "  Data dir            ${DIM}${NATIVE_DATA_DIR}${RESET}"
+  print_static_config_summary
   echo ""
   echo -e "  ${DIM}sudo systemctl status traefik-manager${RESET}"
   echo -e "  ${DIM}sudo journalctl -u traefik-manager -f${RESET}"

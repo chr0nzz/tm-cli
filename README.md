@@ -50,9 +50,10 @@ The script walks you through:
 
 - **Deployment type** - external (internet-facing) or internal (LAN / VPN / Tailscale). If external, it shows which ports to open and waits for confirmation.
 - **Domain + subdomains** - hostnames for the Traefik dashboard and Traefik Manager.
-- **TLS / certificates** - Let's Encrypt HTTP challenge, DNS challenge (Cloudflare, Route 53, DigitalOcean, Namecheap, DuckDNS), or no TLS.
+- **TLS / certificates** - Let's Encrypt HTTP challenge, DNS challenge (Cloudflare, Route 53, DigitalOcean, Namecheap, DuckDNS, deSEC), or no TLS.
 - **Dynamic config layout** - single `dynamic.yml` file or a directory where each service gets its own `.yml`.
 - **Optional mounts** - access logs, `acme.json`, and `traefik.yml` for the Logs, Certs, and Plugins tabs in Traefik Manager.
+- **Static config editor** - if you enable the `traefik.yml` mount, the script also asks which restart method to use (socket proxy, poison pill, or direct socket) and adds all required compose additions automatically.
 - **Docker** - if Docker is not installed, the script offers to install it for you.
 
 ### What gets created
