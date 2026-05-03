@@ -833,7 +833,7 @@ $(if [[ -n "$tls_label_traefik" ]]; then echo "$tls_label_traefik"; fi)
 $(if [[ -n "$traefik_static_labels" ]]; then echo "$traefik_static_labels"; fi)
 
   traefik-manager:
-    image: ghcr.io/chr0nzz/traefik-manager:beta
+    image: ghcr.io/chr0nzz/traefik-manager:latest
     container_name: traefik-manager
     restart: unless-stopped
     networks:
@@ -990,7 +990,7 @@ ${network_def}
 $(if [[ -n "$volumes_section" ]]; then echo "$volumes_section"; fi)
 services:
   traefik-manager:
-    image: ghcr.io/chr0nzz/traefik-manager:beta
+    image: ghcr.io/chr0nzz/traefik-manager:latest
     container_name: traefik-manager
     restart: unless-stopped
     networks:
