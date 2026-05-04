@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_VERSION="1.0.0-beta1.1"
+SCRIPT_VERSION="1.0.0"
 
 BOLD="\033[1m"
 DIM="\033[2m"
