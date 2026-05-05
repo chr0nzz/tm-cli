@@ -1,4 +1,20 @@
 #!/usr/bin/env bash
+
+# --- Installer Information ---
+cat <<EOF >&2
+--------------------------------------------------
+  Traefik Manager Installer
+  --------------------------------------------------
+  Documentation: https://traefik-manager.xyzlab.dev/traefik-stack.html
+  Source Code:   https://github.com/chr0nzz/traefik-manager
+  
+  Running this script will configure the service
+  on your host. Ensure you have root/sudo access.
+  
+  Usage: curl -fsSL https://get-traefik.xyzlab.dev | bash
+--------------------------------------------------
+EOF
+
 set -euo pipefail
 
 SCRIPT_VERSION="1.0.0"
