@@ -1033,7 +1033,7 @@ install_tm_native() {
     warn "${NATIVE_INSTALL_DIR} already exists. Pulling latest changes."
     git -C "${NATIVE_INSTALL_DIR}" pull
   else
-    git clone --branch v1 https://github.com/chr0nzz/traefik-manager.git "${NATIVE_INSTALL_DIR}"
+    git clone --branch main https://github.com/chr0nzz/traefik-manager.git "${NATIVE_INSTALL_DIR}"
   fi
   ok "Repository cloned to ${NATIVE_INSTALL_DIR}"
 
