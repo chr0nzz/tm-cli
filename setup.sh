@@ -586,7 +586,7 @@ build_traefik_static() {
   if [[ "$TLS_TYPE" == "http" ]]; then
     resolver_block="
 certificatesResolvers:
-  letsencrypt:
+  ${CERT_RESOLVER}:
     acme:
       email: ${ACME_EMAIL}
       storage: /acme.json
@@ -595,7 +595,7 @@ certificatesResolvers:
   elif [[ "$TLS_TYPE" == "dns" ]]; then
     resolver_block="
 certificatesResolvers:
-  letsencrypt:
+  ${CERT_RESOLVER}:
     acme:
       email: ${ACME_EMAIL}
       storage: /acme.json
@@ -678,7 +678,7 @@ http:
         - websecure
       service: my-app
       tls:
-        certResolver: letsencrypt
+        certResolver: ${CERT_RESOLVER}
 
   services:
     my-app:
