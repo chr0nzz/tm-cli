@@ -17,7 +17,7 @@ EOF
 
 set -euo pipefail
 
-SCRIPT_VERSION="1.0.0"
+SCRIPT_VERSION="1.2.0"
 
 BOLD="\033[1m"
 DIM="\033[2m"
