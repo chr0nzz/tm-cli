@@ -54,6 +54,7 @@ The script walks you through:
 - **Dynamic config layout** - single `dynamic.yml` file or a directory where each service gets its own `.yml`.
 - **Optional mounts** - access logs, `acme.json`, and `traefik.yml` for the Logs, Certs, and Plugins tabs in Traefik Manager.
 - **Static config editor** - if you enable the `traefik.yml` mount, the script also asks which restart method to use (socket proxy, poison pill, or direct socket) and adds all required compose additions automatically.
+- **CrowdSec** - optionally add CrowdSec intrusion detection. Choose to install it as part of the stack (generates a bouncer key, adds the service, writes `acquis.yaml`) or connect to an existing instance (prompts for LAPI URL and API key). Credentials are injected into Traefik Manager automatically so the CrowdSec tab works out of the box.
 - **Docker** - if Docker is not installed, the script offers to install it for you.
 
 ### What gets created
@@ -72,6 +73,8 @@ The script walks you through:
 - traefik-manager/
   - config/
   - backups/
+- crowdsec/              (only if CrowdSec install mode chosen)
+  - acquis.yaml
 ```
 
 ---

@@ -17,7 +17,7 @@ EOF
 
 set -euo pipefail
 
-SCRIPT_VERSION="1.2.0"
+SCRIPT_VERSION="1.3.0"
 
 BOLD="\033[1m"
 DIM="\033[2m"
@@ -38,6 +38,11 @@ TRAEFIK_SERVICE_NAME="traefik"
 MOUNT_STATIC_CONFIG="false"
 TRAEFIK_YML_HOST_PATH=""
 SIGNAL_FILE_PATH="/signals/restart.sig"
+ADD_CROWDSEC="false"
+CROWDSEC_MODE=""
+CS_LAPI_URL=""
+CS_API_KEY=""
+CS_KEY=""
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -329,6 +334,26 @@ gather_full_stack() {
 
   sep
   echo ""
+  echo -e "  ${BOLD}-- CrowdSec IDS --${RESET}"
+  info "CrowdSec detects intrusions and bans malicious IPs. Visible in the CrowdSec tab in Traefik Manager."
+  ask_yn "Add CrowdSec?" "n" ADD_CROWDSEC
+  if [[ "$ADD_CROWDSEC" == "true" ]]; then
+    ask_choice "CrowdSec setup" CROWDSEC_MODE \
+      "Install as part of this stack" \
+      "Connect to existing instance"
+    if [[ "$CROWDSEC_MODE" == "Connect"* ]]; then
+      ask "CrowdSec LAPI URL" "http://crowdsec:8080" CS_LAPI_URL
+      ask "CrowdSec API key" "" CS_API_KEY
+      [[ -z "$CS_API_KEY" ]] && die "A CrowdSec API key is required."
+    fi
+    if [[ "$CROWDSEC_MODE" == "Install"* && "$MOUNT_ACCESS_LOGS" != "true" ]]; then
+      warn "CrowdSec reads Traefik access logs - enabling access log mount."
+      MOUNT_ACCESS_LOGS="true"
+    fi
+  fi
+
+  sep
+  echo ""
   echo -e "  ${BOLD}-- Docker Network --${RESET}"
   ask "Docker network name"       "traefik-net" DOCKER_NETWORK
   ask "Traefik internal API port" "8080"        TRAEFIK_API_PORT
@@ -579,6 +604,17 @@ scaffold_full() {
   chmod 600 "${INSTALL_DIR}/traefik/acme.json"
   touch "${INSTALL_DIR}/traefik/logs/access.log"
   ok "Directories and seed files created"
+
+  if [[ "$ADD_CROWDSEC" == "true" && "$CROWDSEC_MODE" == "Install"* ]]; then
+    mkdir -p "${INSTALL_DIR}/crowdsec"
+    cat > "${INSTALL_DIR}/crowdsec/acquis.yaml" <<'EOF'
+filenames:
+  - /var/log/traefik/access.log
+labels:
+  type: traefik
+EOF
+    ok "crowdsec/acquis.yaml created"
+  fi
 }
 
 build_traefik_static() {
@@ -691,6 +727,12 @@ EOF
 }
 
 build_compose_full() {
+  if [[ "$ADD_CROWDSEC" == "true" && "$CROWDSEC_MODE" == "Install"* ]]; then
+    CS_KEY=$(openssl rand -hex 32)
+    CS_LAPI_URL="http://crowdsec:8080"
+    CS_API_KEY="$CS_KEY"
+  fi
+
   local tls_label_traefik="" tls_label_tm=""
   if [[ "$TLS_TYPE" != "none" ]]; then
     tls_label_traefik='      - "traefik.http.routers.dashboard.tls.certresolver='"${CERT_RESOLVER}"'"'
@@ -811,10 +853,40 @@ ${tm_vols}"
   fi
 
   local volumes_section=""
-  if [[ "$MOUNT_STATIC_CONFIG" == "true" && "$RESTART_METHOD" == "poison-pill" ]]; then
+  if [[ "$MOUNT_STATIC_CONFIG" == "true" && "$RESTART_METHOD" == "poison-pill" ]] || \
+     [[ "$ADD_CROWDSEC" == "true" && "$CROWDSEC_MODE" == "Install"* ]]; then
     volumes_section="
-volumes:
+volumes:"
+    [[ "$MOUNT_STATIC_CONFIG" == "true" && "$RESTART_METHOD" == "poison-pill" ]] && \
+      volumes_section+="
   tm-signals:"
+    [[ "$ADD_CROWDSEC" == "true" && "$CROWDSEC_MODE" == "Install"* ]] && \
+      volumes_section+="
+  crowdsec_data:"
+  fi
+
+  local crowdsec_env=""
+  if [[ "$ADD_CROWDSEC" == "true" ]]; then
+    crowdsec_env="      - CROWDSEC_LAPI_URL=${CS_LAPI_URL}
+      - CROWDSEC_API_KEY=${CS_API_KEY}"
+  fi
+
+  local crowdsec_service=""
+  if [[ "$ADD_CROWDSEC" == "true" && "$CROWDSEC_MODE" == "Install"* ]]; then
+    crowdsec_service="
+  crowdsec:
+    image: crowdsecurity/crowdsec:latest
+    container_name: crowdsec
+    restart: unless-stopped
+    networks:
+      - ${DOCKER_NETWORK}
+    environment:
+      - BOUNCER_KEY_traefik-manager=${CS_KEY}
+      - COLLECTIONS=crowdsecurity/traefik
+    volumes:
+      - crowdsec_data:/var/lib/crowdsec/data
+      - ./crowdsec/acquis.yaml:/etc/crowdsec/acquis.yaml:ro
+      - ./traefik/logs/access.log:/var/log/traefik/access.log:ro"
   fi
 
   cat > "${INSTALL_DIR}/docker-compose.yml" <<EOF
@@ -860,6 +932,7 @@ ${tm_vols}
       - COOKIE_SECURE=${cookie_secure}
 $(if [[ "$CONFIG_LAYOUT" == "Directory"* ]]; then echo "      - CONFIG_DIR=/app/config/dynamic"; fi)
 $(if [[ -n "$static_env" ]]; then echo "$static_env"; fi)
+$(if [[ -n "$crowdsec_env" ]]; then echo "$crowdsec_env"; fi)
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.traefik-manager.rule=Host(\`${TM_HOST}\`)"
@@ -869,6 +942,7 @@ $(if [[ -n "$tls_label_tm" ]]; then echo "$tls_label_tm"; fi)
     depends_on:
       - traefik
 $(if [[ -n "$socket_proxy_service" ]]; then echo "$socket_proxy_service"; fi)
+$(if [[ -n "$crowdsec_service" ]]; then echo "$crowdsec_service"; fi)
 EOF
   ok "docker-compose.yml written"
 }
@@ -1274,6 +1348,20 @@ print_summary_full() {
     echo -e "  ${DIM}Dynamic config  ${INSTALL_DIR}/traefik/config/*.yml${RESET}"
   fi
   print_static_config_summary
+  if [[ "$ADD_CROWDSEC" == "true" ]]; then
+    echo ""
+    echo -e "  ${CYAN}${BOLD}CrowdSec${RESET}"
+    if [[ "$CROWDSEC_MODE" == "Install"* ]]; then
+      echo -e "  ${DIM}Mode            installed as part of this stack${RESET}"
+      echo -e "  ${DIM}LAPI URL        http://crowdsec:8080${RESET}"
+      echo -e "  ${DIM}Bouncer key     ${CS_KEY}${RESET}"
+      info "Enable the CrowdSec tab in Traefik Manager under Settings to view decisions and alerts."
+    else
+      echo -e "  ${DIM}Mode            connected to existing instance${RESET}"
+      echo -e "  ${DIM}LAPI URL        ${CS_LAPI_URL}${RESET}"
+      info "Enable the CrowdSec tab in Traefik Manager under Settings to view decisions and alerts."
+    fi
+  fi
   echo ""
   echo -e "  ${DIM}cd ${INSTALL_DIR}${RESET}"
   echo -e "  ${DIM}${COMPOSE_CMD} logs -f traefik-manager${RESET}"
