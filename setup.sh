@@ -17,7 +17,7 @@ EOF
 
 set -euo pipefail
 
-SCRIPT_VERSION="1.3.0"
+SCRIPT_VERSION="1.4.1"
 
 BOLD="\033[1m"
 DIM="\033[2m"
@@ -1114,6 +1114,9 @@ install_tm_native() {
   python3 -m venv "${NATIVE_INSTALL_DIR}/venv"
   "${NATIVE_INSTALL_DIR}/venv/bin/pip" install -q -r "${NATIVE_INSTALL_DIR}/requirements.txt" gunicorn
   ok "Python dependencies installed"
+
+  bash "${NATIVE_INSTALL_DIR}/scripts/setup-assets.sh"
+  ok "Vendor assets and Tailwind CSS built"
 
   mkdir -p "${NATIVE_DATA_DIR}/backups"
   ok "Data directories created at ${NATIVE_DATA_DIR}"
