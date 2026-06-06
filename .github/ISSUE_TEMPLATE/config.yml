@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report an issue or request a feature
+    url: https://github.com/chr0nzz/traefik-manager/issues/new/choose
+    about: All issues and feature requests should be filed in the main traefik-manager repo
