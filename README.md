@@ -30,6 +30,7 @@ The script starts by asking what you want to install:
 What would you like to install?
   1) Traefik + Traefik Manager (full stack)
   2) Traefik Manager only
+  3) Traefik Manager Agent
 ```
 
 If you choose **Traefik Manager only**, it then asks how to deploy it:
@@ -98,6 +99,27 @@ Installs Traefik Manager as a native systemd service. No Docker required.
 Requirements: Python 3.11+, `git`, `systemd`.
 
 The script handles cloning the repo, creating a Python venv, installing dependencies, writing the systemd unit file, and enabling the service.
+
+---
+
+## Mode 4 - Traefik Manager Agent
+
+Installs the TMA agent on a remote server so a central Traefik Manager can manage it remotely.
+
+Three sub-options:
+- **Docker - Agent only** - deploy TMA alongside an existing Traefik on this server
+- **Docker - Agent + Traefik** - deploy both Traefik and TMA together on a fresh server
+- **Binary - Agent only** - download the `tma` binary and install it as a systemd service
+
+The script asks for the API key (generated in TM Settings - Agents), Traefik API URL, config paths, optional restart method, CrowdSec, and git backup configuration. It generates a ready-to-run `docker-compose.yml` or systemd unit with all options pre-filled.
+
+To skip the menu and go straight to agent mode:
+```bash
+export TMA_INSTALL=1
+curl -fsSL https://get-traefik.xyzlab.dev | bash
+```
+
+Full docs: [traefik-manager.xyzlab.dev/agent](https://traefik-manager.xyzlab.dev/agent)
 
 ---
 

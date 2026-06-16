@@ -17,7 +17,7 @@ EOF
 
 set -euo pipefail
 
-SCRIPT_VERSION="1.4.1"
+SCRIPT_VERSION="1.5"
 
 BOLD="\033[1m"
 DIM="\033[2m"
@@ -58,9 +58,9 @@ print_banner() {
   echo ""
   echo "                       ◉"
   echo "                       │"
-  echo "                    ╔═════╗"
-  echo "              ◉ ─── ╠     ╣ ─── ◉"
-  echo "                    ╚═════╝"
+  echo "                   ╔═════╗"
+  echo "               ◉ ─── ╠     ╣ ─── ◉"
+  echo "                   ╚═════╝"
   echo "                       │"
   echo "                       ◉"
   echo -e "${RESET}"
@@ -101,17 +101,64 @@ ask_yn() {
 
 ask_choice() {
   local prompt="$1" var_name="$2"; shift 2
-  local options=("$@")
+  local -a _ac_opts=("$@")
+  local _ac_sel=0 _ac_count=${#_ac_opts[@]}
+
   echo -e "  ${BOLD}${prompt}${RESET}"
-  for i in "${!options[@]}"; do
-    echo -e "    ${DIM}$((i+1)))${RESET} ${options[$i]}"
-  done
-  echo -ne "  Choice [1]: "
-  read -r input </dev/tty
-  input="${input:-1}"
-  local idx=$(( input - 1 ))
-  if [[ $idx -lt 0 || $idx -ge ${#options[@]} ]]; then idx=0; fi
-  printf -v "$var_name" '%s' "${options[$idx]}"
+
+  __ac_draw() {
+    local _i
+    for _i in "${!_ac_opts[@]}"; do
+      if [[ $_i -eq $_ac_sel ]]; then
+        printf "  \033[1;36m▸ \033[0m\033[1m%s\033[0m\n" "${_ac_opts[$_i]}"
+      else
+        printf "    \033[2m%s\033[0m\n" "${_ac_opts[$_i]}"
+      fi
+    done
+  }
+
+  if [[ -t 0 ]] && command -v tput &>/dev/null; then
+    tput civis 2>/dev/null || true
+    __ac_draw
+    local _key _seq
+    while true; do
+      IFS= read -rsn1 _key </dev/tty || _key=''
+      local _done=0
+      case "$_key" in
+        $'\x1b')
+          IFS= read -rsn2 -t 0.05 _seq </dev/tty 2>/dev/null || _seq=''
+          [[ "$_seq" == '[A' ]] && (( _ac_sel > 0 )) && (( _ac_sel-- )) || true
+          [[ "$_seq" == '[B' ]] && (( _ac_sel < _ac_count-1 )) && (( _ac_sel++ )) || true
+          ;;
+        '') _done=1 ;;
+        [1-9])
+          local _n=$(( _key - 1 ))
+          if (( _n >= 0 && _n < _ac_count )); then _ac_sel=$_n; _done=1; fi
+          ;;
+      esac
+      printf "\033[%dA\033[J" "$_ac_count"
+      __ac_draw
+      (( _done )) && break || true
+    done
+    tput cnorm 2>/dev/null || true
+    echo ""
+  else
+    local _i
+    for _i in "${!_ac_opts[@]}"; do
+      printf "    \033[2m%d)\033[0m %s\n" "$((_i+1))" "${_ac_opts[$_i]}"
+    done
+    printf "  Choice [1]: "
+    local _input
+    read -r _input </dev/tty
+    _input="${_input:-1}"
+    local _idx=$(( _input - 1 ))
+    (( _idx < 0 || _idx >= _ac_count )) && _idx=0
+    _ac_sel=$_idx
+    echo ""
+  fi
+
+  printf -v "$var_name" '%s' "${_ac_opts[$_ac_sel]}"
+  ok "${_ac_opts[$_ac_sel]}"
 }
 
 # ─── Docker ───────────────────────────────────────────────────────────────────
@@ -241,7 +288,8 @@ gather_mode() {
   step "What would you like to install?"
   ask_choice "Choose an option" INSTALL_MODE \
     "Traefik + Traefik Manager (full stack)" \
-    "Traefik Manager only"
+    "Traefik Manager only" \
+    "Traefik Manager Agent"
 
   if [[ "$INSTALL_MODE" == "Traefik Manager only" ]]; then
     sep
@@ -249,6 +297,8 @@ gather_mode() {
     ask_choice "Deployment method" DEPLOY_METHOD \
       "Docker" \
       "Linux service (systemd)"
+  elif [[ "$INSTALL_MODE" == "Traefik Manager Agent" ]]; then
+    DEPLOY_METHOD="Agent"
   else
     DEPLOY_METHOD="Docker"
   fi
@@ -324,7 +374,7 @@ gather_full_stack() {
   echo ""
   echo -e "  ${BOLD}-- Optional Mounts --${RESET}"
   info "Expose extra Traefik data to Traefik Manager for richer visibility."
-  ask_yn "Mount access logs?"                        "y" MOUNT_ACCESS_LOGS
+  ask_yn "Mount access logs?"                      "y" MOUNT_ACCESS_LOGS
   ask_yn "Mount SSL certs (acme.json)?"              "y" MOUNT_CERTS
   ask_yn "Mount Traefik static config (traefik.yml)?" "n" MOUNT_STATIC_CONFIG
 
@@ -776,7 +826,7 @@ ${DNS_ENV_BLOCK}"
 
   local tm_vols="      - ./traefik-manager/config:/app/config
       - ./traefik-manager/backups:/app/backups"
-  if [[ "$MOUNT_STATIC_CONFIG" != "true" || "$RESTART_METHOD" != "proxy" ]]; then
+  if [[ "$RESTART_METHOD" == "socket" ]]; then
     tm_vols="      - /var/run/docker.sock:/var/run/docker.sock:ro
 ${tm_vols}"
   fi
@@ -965,7 +1015,7 @@ build_compose_tm() {
 
   local tm_vols="      - ./config:/app/config
       - ./backups:/app/backups"
-  if [[ "$MOUNT_STATIC_CONFIG" != "true" || "$RESTART_METHOD" != "proxy" ]]; then
+  if [[ "$RESTART_METHOD" == "socket" ]]; then
     tm_vols="      - /var/run/docker.sock:/var/run/docker.sock:ro
 ${tm_vols}"
   fi
@@ -1441,13 +1491,874 @@ print_summary_native() {
   echo ""
 }
 
+# ─── Agent installer ──────────────────────────────────────────────────────────
+
+AGENT_INSTALL_METHOD=""
+AGENT_API_KEY=""
+AGENT_TRAEFIK_URL="http://traefik:8080"
+AGENT_CONFIG_PATH="/app/config"
+AGENT_STATIC_PATH=""
+AGENT_INSECURE_TLS="false"
+AGENT_ACME_PATH=""
+AGENT_LOG_PATH=""
+AGENT_PLUGINS_DIR=""
+AGENT_RESTART_METHOD=""
+AGENT_CONTAINER="traefik"
+AGENT_DOCKER_HOST=""
+AGENT_SIGNAL_FILE=""
+AGENT_CS_MODE="none"
+AGENT_CS_URL=""
+AGENT_CS_KEY=""
+AGENT_CS_INSTALL_KEY=""
+AGENT_GIT_ENABLED="false"
+AGENT_GIT_REPO=""
+AGENT_GIT_BRANCH="main"
+AGENT_GIT_USER=""
+AGENT_GIT_TOKEN=""
+AGENT_GIT_AUTO="true"
+AGENT_INSTALL_DIR="${INSTALL_DIR:-/opt/traefik-manager-agent}"
+AGENT_PORT="8090"
+AGENT_NETWORK="traefik-net"
+AGENT_HAS_WEBSECURE="true"
+AGENT_TLS_TYPE="none"
+AGENT_ACME_EMAIL=""
+AGENT_CERT_RESOLVER="letsencrypt"
+AGENT_TRAEFIK_DASHBOARD="true"
+AGENT_DASHBOARD_HOST=""
+AGENT_EXTERNAL="false"
+AGENT_CONFIG_LAYOUT=""
+AGENT_TRAEFIK_API_PORT="8080"
+AGENT_HOST=""
+AGENT_SEC_LABELS=()
+AGENT_SEC_FNS=()
+
+_agent_sec_method() {
+  sep; echo ""
+  echo -e "  ${BOLD}-- Install method --${RESET}"
+  info "TMA runs alongside Traefik and lets a central TM manage this server remotely."
+  ask_choice "Install method" AGENT_INSTALL_METHOD \
+    "Docker - Agent only (alongside existing Traefik)" \
+    "Docker - Agent + Traefik (deploy both together)" \
+    "Binary - Agent only (systemd service, no Docker)"
+}
+
+_agent_sec_apikey() {
+  sep; echo ""
+  echo -e "  ${BOLD}-- API key --${RESET}"
+  info "Generate this in TM Settings -> Agents before running the script."
+  while true; do
+    echo -ne "  ${BOLD}API key (TMA_API_KEY):${RESET} "
+    read -r AGENT_API_KEY </dev/tty
+    [[ -n "$AGENT_API_KEY" ]] && break
+    warn "API key is required."
+  done
+  ok "API key set"
+}
+
+_agent_sec_traefik() {
+  sep; echo ""
+  echo -e "  ${BOLD}-- Traefik connection --${RESET}"
+  ask "Traefik API URL" "http://traefik:8080" AGENT_TRAEFIK_URL
+  ask "Dynamic config path" "/app/config" AGENT_CONFIG_PATH
+  if [[ "$AGENT_TRAEFIK_URL" == https://* ]]; then
+    ask_yn "Skip TLS verification? (needed for self-signed / Cloudflare Origin certs)" "n" AGENT_INSECURE_TLS
+  else
+    AGENT_INSECURE_TLS="false"
+  fi
+  local _mount_static
+  ask_yn "Mount static config (traefik.yml)?" "n" _mount_static
+  if [[ "$_mount_static" == "true" ]]; then
+    ask "Static config path" "/etc/traefik/traefik.yml" AGENT_STATIC_PATH
+  else
+    AGENT_STATIC_PATH=""
+  fi
+}
+
+_agent_sec_traefik_install() {
+  sep; echo ""
+  echo -e "  ${BOLD}-- Traefik install --${RESET}"
+  info "Traefik will be deployed on the same server alongside the agent."
+
+  local _deploy_type
+  ask_choice "Where will this be accessed from?" _deploy_type \
+    "External (internet-facing)" \
+    "Internal only (LAN / VPN / Tailscale)"
+  [[ "$_deploy_type" == "External"* ]] && AGENT_EXTERNAL="true" || AGENT_EXTERNAL="false"
+
+  ask_yn "Enable Traefik dashboard?" "y" AGENT_TRAEFIK_DASHBOARD
+  if [[ "$AGENT_TRAEFIK_DASHBOARD" == "true" ]]; then
+    ask "Dashboard hostname (e.g. traefik.example.com)" "" AGENT_DASHBOARD_HOST
+  else
+    AGENT_DASHBOARD_HOST=""
+  fi
+
+  sep; echo ""
+  echo -e "  ${BOLD}-- TLS / Certificates --${RESET}"
+  gather_tls_method
+  AGENT_TLS_TYPE="$TLS_TYPE"
+  AGENT_CERT_RESOLVER="$CERT_RESOLVER"
+  AGENT_ACME_EMAIL="${ACME_EMAIL:-}"
+  [[ "$TLS_TYPE" != "none" ]] && AGENT_HAS_WEBSECURE="true" || AGENT_HAS_WEBSECURE="false"
+
+  sep; echo ""
+  echo -e "  ${BOLD}-- Dynamic Config --${RESET}"
+  info "Single file is simpler. Directory (one .yml per service) is easier at scale."
+  ask_choice "Dynamic config layout" AGENT_CONFIG_LAYOUT \
+    "Single file (dynamic.yml)" \
+    "Directory - one .yml file per service"
+
+  ask "Docker network name" "traefik-net" AGENT_NETWORK
+  ask "Traefik internal API port" "8080" AGENT_TRAEFIK_API_PORT
+
+  AGENT_TRAEFIK_URL="http://traefik:${AGENT_TRAEFIK_API_PORT}"
+  AGENT_CONFIG_PATH="/etc/traefik/config"
+
+  sep; echo ""
+  echo -e "  ${BOLD}-- Agent access --${RESET}"
+  info "The agent port is always bound. A Traefik label adds a hostname + TLS route on top."
+  local _use_label
+  ask_yn "Expose agent via Traefik label (recommended for HTTPS)?" "y" _use_label
+  if [[ "$_use_label" == "true" ]]; then
+    ask "Agent hostname (e.g. agent.example.com)" "" AGENT_HOST
+  else
+    AGENT_HOST=""
+  fi
+
+  AGENT_LOG_PATH="/var/log/traefik/access.log"
+  [[ "$AGENT_TLS_TYPE" != "none" ]] && AGENT_ACME_PATH="/etc/traefik/acme.json" || AGENT_ACME_PATH=""
+
+  if [[ "$AGENT_EXTERNAL" == "true" ]]; then
+    sep; echo ""
+    echo -e "  ${YELLOW}${BOLD}Firewall / Port Requirements${RESET}"
+    echo -e "  ${DIM}The following ports must be open on this server's firewall:${RESET}\n"
+    if [[ "$TLS_TYPE" != "none" ]]; then
+      echo -e "    ${CYAN}80/tcp${RESET}   HTTP (redirects to HTTPS + ACME challenge)"
+      echo -e "    ${CYAN}443/tcp${RESET}  HTTPS"
+    else
+      echo -e "    ${CYAN}80/tcp${RESET}   HTTP"
+    fi
+    echo ""
+    echo -e "  ${DIM}  sudo ufw allow 80/tcp${RESET}"
+    [[ "$TLS_TYPE" != "none" ]] && echo -e "  ${DIM}  sudo ufw allow 443/tcp${RESET}"
+    echo -e "  ${DIM}  sudo ufw reload${RESET}"
+    echo ""
+    echo -ne "  ${BOLD}Press Enter when ports are open to continue...${RESET}"
+    read -r </dev/tty
+  fi
+}
+
+_agent_sec_paths() {
+  sep; echo ""
+  echo -e "  ${BOLD}-- Optional paths --${RESET}"
+  info "Expose extra Traefik data to the agent for richer visibility."
+  local _has
+  ask_yn "Mount ACME / certs (acme.json)?" "n" _has
+  [[ "$_has" == "true" ]] && ask "ACME path" "/etc/traefik/acme.json" AGENT_ACME_PATH || AGENT_ACME_PATH=""
+  ask_yn "Mount access logs?" "n" _has
+  [[ "$_has" == "true" ]] && ask "Access log path" "/var/log/traefik/access.log" AGENT_LOG_PATH || AGENT_LOG_PATH=""
+  ask_yn "Mount plugins directory?" "n" _has
+  [[ "$_has" == "true" ]] && ask "Plugins dir" "/etc/traefik/plugins" AGENT_PLUGINS_DIR || AGENT_PLUGINS_DIR=""
+}
+
+_agent_sec_restart() {
+  sep; echo ""
+  echo -e "  ${BOLD}-- Traefik restart --${RESET}"
+  info "Allows the agent to restart Traefik after static config changes."
+  local _choice
+  ask_choice "Restart method" _choice \
+    "None" \
+    "Socket proxy (recommended - minimal socket exposure)" \
+    "Poison pill (signal file, no Docker socket)" \
+    "Direct Docker socket"
+  case "$_choice" in
+    "Socket proxy"*)
+      AGENT_RESTART_METHOD="proxy"
+      ask "Docker host" "tcp://socket-proxy:2375" AGENT_DOCKER_HOST
+      ask "Traefik container name" "traefik" AGENT_CONTAINER
+      ;;
+    "Poison pill"*)
+      AGENT_RESTART_METHOD="poison-pill"
+      ask "Signal file path" "/signals/restart.sig" AGENT_SIGNAL_FILE
+      ;;
+    "Direct Docker"*)
+      AGENT_RESTART_METHOD="socket"
+      ask "Traefik container name" "traefik" AGENT_CONTAINER
+      ;;
+    *)
+      AGENT_RESTART_METHOD=""
+      AGENT_DOCKER_HOST=""
+      AGENT_SIGNAL_FILE=""
+      ;;
+  esac
+}
+
+_agent_sec_crowdsec() {
+  sep; echo ""
+  echo -e "  ${BOLD}-- CrowdSec (optional) --${RESET}"
+  local _cs_choice
+  if [[ "$AGENT_INSTALL_METHOD" == "Binary"* ]]; then
+    ask_choice "CrowdSec integration" _cs_choice "None" "Connect to existing instance"
+  else
+    ask_choice "CrowdSec integration" _cs_choice \
+      "None" \
+      "Install alongside agent" \
+      "Connect to existing instance"
+  fi
+  case "$_cs_choice" in
+    "Install alongside"*)
+      AGENT_CS_MODE="install"
+      AGENT_CS_INSTALL_KEY=$(openssl rand -hex 32 2>/dev/null || od -A n -t x -N 32 /dev/urandom | tr -d ' \n')
+      if [[ -z "$AGENT_LOG_PATH" ]]; then
+        warn "CrowdSec reads Traefik access logs - enabling access log mount."
+        ask "Access log path" "/var/log/traefik/access.log" AGENT_LOG_PATH
+      fi
+      AGENT_CS_URL="http://crowdsec:8080"
+      AGENT_CS_KEY="$AGENT_CS_INSTALL_KEY"
+      ok "CrowdSec will be installed alongside the agent"
+      ;;
+    "Connect"*)
+      AGENT_CS_MODE="connect"
+      AGENT_CS_INSTALL_KEY=""
+      ask "LAPI URL" "http://crowdsec:8080" AGENT_CS_URL
+      echo -ne "  ${BOLD}API key:${RESET} "
+      read -r AGENT_CS_KEY </dev/tty
+      ;;
+    *)
+      AGENT_CS_MODE="none"
+      AGENT_CS_URL=""
+      AGENT_CS_KEY=""
+      AGENT_CS_INSTALL_KEY=""
+      ;;
+  esac
+}
+
+_agent_sec_git() {
+  sep; echo ""
+  echo -e "  ${BOLD}-- Git backup (optional) --${RESET}"
+  local _add_git
+  ask_choice "Enable git backup?" _add_git "No" "Yes"
+  if [[ "$_add_git" == "Yes" ]]; then
+    AGENT_GIT_ENABLED="true"
+    ask "Repository URL" "" AGENT_GIT_REPO
+    ask "Branch" "main" AGENT_GIT_BRANCH
+    ask "Username" "" AGENT_GIT_USER
+    echo -ne "  ${BOLD}Access token:${RESET} "
+    read -r AGENT_GIT_TOKEN </dev/tty
+    local _auto
+    ask_choice "Auto-push on config change?" _auto "Yes" "No"
+    [[ "$_auto" == "No" ]] && AGENT_GIT_AUTO="false" || AGENT_GIT_AUTO="true"
+  else
+    AGENT_GIT_ENABLED="false"
+    AGENT_GIT_REPO=""
+    AGENT_GIT_TOKEN=""
+  fi
+}
+
+_agent_sec_location() {
+  sep; echo ""
+  echo -e "  ${BOLD}-- Install location --${RESET}"
+  ask "Install directory" "/opt/traefik-manager-agent" AGENT_INSTALL_DIR
+  ask "Agent port" "8090" AGENT_PORT
+}
+
+_agent_build_section_list() {
+  AGENT_SEC_LABELS=()
+  AGENT_SEC_FNS=()
+  AGENT_SEC_LABELS+=("Install method"); AGENT_SEC_FNS+=("_agent_sec_method")
+  AGENT_SEC_LABELS+=("API key");        AGENT_SEC_FNS+=("_agent_sec_apikey")
+  if [[ "$AGENT_INSTALL_METHOD" == *"+ Traefik"* ]]; then
+    AGENT_SEC_LABELS+=("Traefik install");    AGENT_SEC_FNS+=("_agent_sec_traefik_install")
+  else
+    AGENT_SEC_LABELS+=("Traefik connection"); AGENT_SEC_FNS+=("_agent_sec_traefik")
+  fi
+  AGENT_SEC_LABELS+=("Optional paths");  AGENT_SEC_FNS+=("_agent_sec_paths")
+  AGENT_SEC_LABELS+=("Restart method");  AGENT_SEC_FNS+=("_agent_sec_restart")
+  AGENT_SEC_LABELS+=("CrowdSec");        AGENT_SEC_FNS+=("_agent_sec_crowdsec")
+  AGENT_SEC_LABELS+=("Git backup");      AGENT_SEC_FNS+=("_agent_sec_git")
+  if [[ "$AGENT_INSTALL_METHOD" != "Binary"* ]]; then
+    AGENT_SEC_LABELS+=("Install location"); AGENT_SEC_FNS+=("_agent_sec_location")
+  fi
+}
+
+_agent_show_review() {
+  local _mask="(not set)"
+  [[ -n "$AGENT_API_KEY" ]] && _mask="${AGENT_API_KEY:0:4}••••••••"
+  echo ""
+  echo -e "  ${BOLD}Review configuration${RESET}"
+  echo -e "  ${DIM}────────────────────────────────────────────────────────${RESET}"
+  local _i=1
+  for _lbl in "${AGENT_SEC_LABELS[@]}"; do
+    local _val=""
+    case "$_lbl" in
+      "Install method")
+        _val="${AGENT_INSTALL_METHOD//Docker - /}"
+        _val="${_val//Binary - /}"
+        ;;
+      "API key") _val="$_mask" ;;
+      "Traefik connection")
+        _val="$AGENT_TRAEFIK_URL"
+        [[ "$AGENT_INSECURE_TLS" == "true" ]] && _val+="  insecure-tls"
+        [[ -n "$AGENT_STATIC_PATH" ]] && _val+="  static:$(basename "$AGENT_STATIC_PATH")"
+        ;;
+      "Traefik install")
+        _val="${AGENT_TLS_TYPE:-none}"
+        [[ "$AGENT_EXTERNAL" == "true" ]] && _val+="  external" || _val+="  internal"
+        [[ -n "$AGENT_DASHBOARD_HOST" ]] && _val+="  dash:${AGENT_DASHBOARD_HOST}"
+        [[ -n "$AGENT_HOST" ]] && _val+="  tma:${AGENT_HOST}"
+        _val+="  net:${AGENT_NETWORK}"
+        [[ -n "$AGENT_CONFIG_LAYOUT" ]] && _val+="  $(echo "$AGENT_CONFIG_LAYOUT" | grep -o 'Single\|Directory')"
+        ;;
+      "Optional paths")
+        local _p=""
+        [[ -n "$AGENT_ACME_PATH" ]]   && _p+="acme "
+        [[ -n "$AGENT_LOG_PATH" ]]    && _p+="logs "
+        [[ -n "$AGENT_PLUGINS_DIR" ]] && _p+="plugins"
+        _val="${_p:-(none)}"
+        ;;
+      "Restart method") _val="${AGENT_RESTART_METHOD:-(none)}" ;;
+      "CrowdSec")
+        case "$AGENT_CS_MODE" in
+          install) _val="install alongside" ;;
+          connect) _val="connect  ${AGENT_CS_URL}" ;;
+          *)       _val="disabled" ;;
+        esac
+        ;;
+      "Git backup")
+        [[ "$AGENT_GIT_ENABLED" == "true" ]] && _val="${AGENT_GIT_REPO:-(no repo set)}" || _val="disabled"
+        ;;
+      "Install location") _val="${AGENT_INSTALL_DIR}  :${AGENT_PORT}" ;;
+    esac
+    printf "  \033[1;36m%2d\033[0m  \033[2m%-20s\033[0m  %s\n" "$_i" "$_lbl" "$_val"
+    (( _i++ ))
+  done
+  echo -e "  ${DIM}────────────────────────────────────────────────────────${RESET}"
+}
+
+gather_agent() {
+  step "Traefik Manager Agent Setup"
+
+  _agent_sec_method
+  _agent_build_section_list
+  local _prev_method="$AGENT_INSTALL_METHOD"
+
+  for _fn in "${AGENT_SEC_FNS[@]:1}"; do "$_fn"; done
+
+  while true; do
+    _agent_show_review
+    echo ""
+    echo -ne "  ${BOLD}Edit a section (1-${#AGENT_SEC_FNS[@]}) or Enter to install:${RESET} "
+    local _choice
+    read -r _choice </dev/tty
+    [[ -z "$_choice" ]] && break
+    if [[ "$_choice" =~ ^[0-9]+$ ]] && (( _choice >= 1 && _choice <= ${#AGENT_SEC_FNS[@]} )); then
+      "${AGENT_SEC_FNS[$((_choice-1))]}"
+      if (( _choice == 1 )) && [[ "$AGENT_INSTALL_METHOD" != "$_prev_method" ]]; then
+        _agent_build_section_list
+        _prev_method="$AGENT_INSTALL_METHOD"
+      fi
+    fi
+  done
+}
+
+build_agent_env() {
+  local lines=""
+  lines+="      - TMA_API_KEY=${AGENT_API_KEY}\n"
+  lines+="      - TRAEFIK_API_URL=${AGENT_TRAEFIK_URL}\n"
+  lines+="      - TMA_RATE_LIMIT=300\n"
+  lines+="      - CONFIG_PATH=${AGENT_CONFIG_PATH}\n"
+  [[ "$AGENT_INSECURE_TLS" == "true" ]]     && lines+="      - TRAEFIK_INSECURE_SKIP_VERIFY=true\n"
+  [[ -n "$AGENT_STATIC_PATH" ]]             && lines+="      - STATIC_CONFIG_PATH=${AGENT_STATIC_PATH}\n"
+  [[ -n "$AGENT_RESTART_METHOD" ]]          && lines+="      - RESTART_METHOD=${AGENT_RESTART_METHOD}\n"
+  [[ -n "$AGENT_RESTART_METHOD" && -n "$AGENT_CONTAINER" ]] && lines+="      - TRAEFIK_CONTAINER=${AGENT_CONTAINER}\n"
+  [[ "$AGENT_RESTART_METHOD" == "proxy" && -n "$AGENT_DOCKER_HOST" ]]       && lines+="      - DOCKER_HOST=${AGENT_DOCKER_HOST}\n"
+  [[ "$AGENT_RESTART_METHOD" == "poison-pill" && -n "$AGENT_SIGNAL_FILE" ]] && lines+="      - SIGNAL_FILE_PATH=${AGENT_SIGNAL_FILE}\n"
+  [[ -n "$AGENT_ACME_PATH" ]]               && lines+="      - ACME_JSON_PATH=${AGENT_ACME_PATH}\n"
+  [[ -n "$AGENT_LOG_PATH" ]]                && lines+="      - ACCESS_LOG_PATH=${AGENT_LOG_PATH}\n"
+  [[ -n "$AGENT_PLUGINS_DIR" ]]             && lines+="      - PLUGINS_DIR=${AGENT_PLUGINS_DIR}\n"
+  if [[ "$AGENT_CS_MODE" == "install" ]]; then
+    lines+="      - CROWDSEC_LAPI_URL=http://crowdsec:8080\n"
+    lines+="      - CROWDSEC_API_KEY=${AGENT_CS_INSTALL_KEY}\n"
+  elif [[ "$AGENT_CS_MODE" == "connect" ]]; then
+    [[ -n "$AGENT_CS_URL" ]] && lines+="      - CROWDSEC_LAPI_URL=${AGENT_CS_URL}\n"
+    [[ -n "$AGENT_CS_KEY" ]] && lines+="      - CROWDSEC_API_KEY=${AGENT_CS_KEY}\n"
+  fi
+  if [[ "$AGENT_GIT_ENABLED" == "true" ]]; then
+    lines+="      - GIT_BACKUP_ENABLED=true\n"
+    [[ -n "$AGENT_GIT_REPO" ]]  && lines+="      - GIT_BACKUP_REPO=${AGENT_GIT_REPO}\n"
+    lines+="      - GIT_BACKUP_BRANCH=${AGENT_GIT_BRANCH}\n"
+    [[ -n "$AGENT_GIT_USER" ]]  && lines+="      - GIT_BACKUP_USERNAME=${AGENT_GIT_USER}\n"
+    [[ -n "$AGENT_GIT_TOKEN" ]] && lines+="      - GIT_BACKUP_TOKEN=${AGENT_GIT_TOKEN}\n"
+    lines+="      - GIT_BACKUP_AUTO_PUSH=${AGENT_GIT_AUTO}\n"
+  fi
+  printf "%b" "$lines"
+}
+
+build_agent_vols() {
+  local lines=""
+  lines+="      - ${AGENT_CONFIG_PATH}:${AGENT_CONFIG_PATH}\n"
+  [[ -n "$AGENT_STATIC_PATH" ]]  && lines+="      - ${AGENT_STATIC_PATH}:${AGENT_STATIC_PATH}\n"
+  [[ -n "$AGENT_ACME_PATH" ]]    && lines+="      - ${AGENT_ACME_PATH}:${AGENT_ACME_PATH}:ro\n"
+  [[ -n "$AGENT_LOG_PATH" ]]     && lines+="      - ${AGENT_LOG_PATH}:${AGENT_LOG_PATH}:ro\n"
+  [[ -n "$AGENT_PLUGINS_DIR" ]]  && lines+="      - ${AGENT_PLUGINS_DIR}:${AGENT_PLUGINS_DIR}:ro\n"
+  [[ "$AGENT_RESTART_METHOD" == "socket" ]]      && lines+="      - /var/run/docker.sock:/var/run/docker.sock:ro\n"
+  [[ "$AGENT_RESTART_METHOD" == "poison-pill" ]] && lines+="      - traefik-signals:/signals\n"
+  printf "%b" "$lines"
+}
+
+scaffold_agent() {
+  step "Creating install directory"
+  mkdir -p "${AGENT_INSTALL_DIR}"
+  if [[ "$AGENT_CS_MODE" == "install" ]]; then
+    mkdir -p "${AGENT_INSTALL_DIR}/crowdsec"
+    cat > "${AGENT_INSTALL_DIR}/crowdsec/acquis.yaml" <<'ACQUIS'
+filenames:
+  - /var/log/traefik/access.log
+labels:
+  type: traefik
+ACQUIS
+    ok "crowdsec/acquis.yaml created"
+  fi
+  ok "Directory ready at ${AGENT_INSTALL_DIR}"
+}
+
+scaffold_agent_with_traefik() {
+  step "Creating directory structure at ${AGENT_INSTALL_DIR}"
+  mkdir -p "${AGENT_INSTALL_DIR}/traefik/config"
+  mkdir -p "${AGENT_INSTALL_DIR}/traefik/logs"
+  touch "${AGENT_INSTALL_DIR}/traefik/logs/access.log"
+  if [[ "$AGENT_TLS_TYPE" != "none" ]]; then
+    touch "${AGENT_INSTALL_DIR}/traefik/acme.json"
+    chmod 600 "${AGENT_INSTALL_DIR}/traefik/acme.json"
+    ok "traefik/acme.json created (chmod 600)"
+  fi
+  if [[ "$AGENT_CONFIG_LAYOUT" == "Single file"* ]]; then
+    cat > "${AGENT_INSTALL_DIR}/traefik/config/dynamic.yml" <<'EOF'
+http:
+  routers: {}
+  services: {}
+  middlewares: {}
+EOF
+    ok "traefik/config/dynamic.yml created"
+  else
+    ok "traefik/config/ directory ready"
+  fi
+  if [[ "$AGENT_CS_MODE" == "install" ]]; then
+    mkdir -p "${AGENT_INSTALL_DIR}/crowdsec"
+    cat > "${AGENT_INSTALL_DIR}/crowdsec/acquis.yaml" <<'ACQUIS'
+filenames:
+  - /var/log/traefik/access.log
+labels:
+  type: traefik
+ACQUIS
+    ok "crowdsec/acquis.yaml created"
+  fi
+  ok "Directory structure created"
+}
+
+build_agent_traefik_static() {
+  local resolver_block=""
+  if [[ "$AGENT_TLS_TYPE" == "http" ]]; then
+    resolver_block="
+certificatesResolvers:
+  ${AGENT_CERT_RESOLVER}:
+    acme:
+      email: ${AGENT_ACME_EMAIL}
+      storage: /acme.json
+      httpChallenge:
+        entryPoint: web"
+  elif [[ "$AGENT_TLS_TYPE" == "dns" ]]; then
+    resolver_block="
+certificatesResolvers:
+  ${AGENT_CERT_RESOLVER}:
+    acme:
+      email: ${AGENT_ACME_EMAIL}
+      storage: /acme.json
+      dnsChallenge:
+        provider: ${DNS_PROVIDER}
+        resolvers:
+          - \"1.1.1.1:53\"
+          - \"8.8.8.8:53\""
+  fi
+
+  local file_provider=""
+  if [[ "$AGENT_CONFIG_LAYOUT" == "Single file"* ]]; then
+    file_provider="  file:
+    filename: /etc/traefik/config/dynamic.yml
+    watch: true"
+  else
+    file_provider="  file:
+    directory: /etc/traefik/config
+    watch: true"
+  fi
+
+  local entrypoints_block
+  if [[ "$AGENT_HAS_WEBSECURE" == "true" ]]; then
+    entrypoints_block="  web:
+    address: \":80\"
+    http:
+      redirections:
+        entryPoint:
+          to: websecure
+          scheme: https
+  websecure:
+    address: \":443\""
+  else
+    entrypoints_block="  web:
+    address: \":80\""
+  fi
+
+  cat > "${AGENT_INSTALL_DIR}/traefik/traefik.yml" <<EOF
+api:
+  dashboard: ${AGENT_TRAEFIK_DASHBOARD}
+  insecure: true
+
+entryPoints:
+${entrypoints_block}
+
+providers:
+  docker:
+    exposedByDefault: false
+    network: ${AGENT_NETWORK}
+${file_provider}
+${resolver_block}
+
+log:
+  level: INFO
+
+accessLog:
+  filePath: /logs/access.log
+  bufferingSize: 100
+EOF
+  ok "traefik/traefik.yml written"
+}
+
+build_agent_compose() {
+  local env_block vol_block
+  env_block="$(build_agent_env)"
+  vol_block="$(build_agent_vols)"
+
+  local volumes_section=""
+  if [[ "$AGENT_RESTART_METHOD" == "poison-pill" ]] || [[ "$AGENT_CS_MODE" == "install" ]]; then
+    volumes_section="\nvolumes:"
+    [[ "$AGENT_RESTART_METHOD" == "poison-pill" ]] && volumes_section+="\n  traefik-signals:"
+    [[ "$AGENT_CS_MODE" == "install" ]]            && volumes_section+="\n  crowdsec_data:"
+  fi
+
+  local cs_service=""
+  if [[ "$AGENT_CS_MODE" == "install" ]]; then
+    cs_service="\n  crowdsec:\n    image: crowdsecurity/crowdsec:latest\n    container_name: crowdsec\n    restart: unless-stopped\n    environment:\n      - BOUNCER_KEY_tma=${AGENT_CS_INSTALL_KEY}\n      - COLLECTIONS=crowdsecurity/traefik\n    volumes:\n      - crowdsec_data:/var/lib/crowdsec/data\n      - ./crowdsec/acquis.yaml:/etc/crowdsec/acquis.yaml:ro"
+    [[ -n "$AGENT_LOG_PATH" ]] && cs_service+="\n      - ${AGENT_LOG_PATH}:/var/log/traefik/access.log:ro"
+  fi
+
+  cat > "${AGENT_INSTALL_DIR}/docker-compose.yml" <<COMPOSE
+services:
+
+  traefik-manager-agent:
+    image: ghcr.io/chr0nzz/traefik-manager-agent:latest
+    container_name: traefik-manager-agent
+    restart: unless-stopped
+    ports:
+      - "${AGENT_PORT}:8090"
+    environment:
+${env_block}
+    volumes:
+${vol_block}
+$(printf "%b" "$cs_service")
+$(printf "%b" "$volumes_section")
+COMPOSE
+  ok "docker-compose.yml written"
+}
+
+build_agent_compose_with_traefik() {
+  local env_block
+  env_block="$(build_agent_env)"
+
+  local traefik_config_vol=""
+  local agent_config_vol=""
+  if [[ "$AGENT_CONFIG_LAYOUT" == "Single file"* ]]; then
+    traefik_config_vol="      - ./traefik/config/dynamic.yml:/etc/traefik/config/dynamic.yml:ro"
+    agent_config_vol="      - ./traefik/config/dynamic.yml:/etc/traefik/config/dynamic.yml\n"
+  else
+    traefik_config_vol="      - ./traefik/config:/etc/traefik/config:ro"
+    agent_config_vol="      - ./traefik/config:/etc/traefik/config\n"
+  fi
+
+  local agent_vols=""
+  agent_vols+="$agent_config_vol"
+  agent_vols+="      - ./traefik/logs/access.log:/var/log/traefik/access.log:ro\n"
+  [[ "$AGENT_TLS_TYPE" != "none" ]] && agent_vols+="      - ./traefik/acme.json:/etc/traefik/acme.json:ro\n"
+  [[ -n "$AGENT_PLUGINS_DIR" ]] && agent_vols+="      - ${AGENT_PLUGINS_DIR}:${AGENT_PLUGINS_DIR}:ro\n"
+  [[ "$AGENT_RESTART_METHOD" == "socket" ]]      && agent_vols+="      - /var/run/docker.sock:/var/run/docker.sock:ro\n"
+  [[ "$AGENT_RESTART_METHOD" == "poison-pill" ]] && agent_vols+="      - traefik-signals:/signals\n"
+
+  local agent_label_block=""
+  if [[ -n "$AGENT_HOST" ]]; then
+    local _ep="${TRAEFIK_ENTRYPOINT:-web}"
+    agent_label_block="    labels:
+      - \"traefik.enable=true\"
+      - \"traefik.http.routers.tma.rule=Host(\`${AGENT_HOST}\`)\"
+      - \"traefik.http.routers.tma.entrypoints=${_ep}\"
+      - \"traefik.http.services.tma.loadbalancer.server.port=8090\""
+    [[ "$AGENT_TLS_TYPE" != "none" ]] && \
+      agent_label_block+="
+      - \"traefik.http.routers.tma.tls.certresolver=${AGENT_CERT_RESOLVER}\""
+    agent_label_block+="
+"
+  fi
+
+  local traefik_ports='"80:80"'
+  [[ "$AGENT_HAS_WEBSECURE" == "true" ]] && traefik_ports+="
+      - \"443:443\""
+
+  local traefik_env_block=""
+  if [[ -n "${DNS_ENV_BLOCK:-}" ]]; then
+    traefik_env_block="    environment:
+${DNS_ENV_BLOCK}
+"
+  fi
+
+  local traefik_acme_vol=""
+  [[ "$AGENT_TLS_TYPE" != "none" ]] && traefik_acme_vol="
+      - ./traefik/acme.json:/acme.json"
+
+  local dashboard_block=""
+  if [[ "$AGENT_TRAEFIK_DASHBOARD" == "true" && -n "$AGENT_DASHBOARD_HOST" ]]; then
+    local _ep="${TRAEFIK_ENTRYPOINT:-web}"
+    dashboard_block="    labels:
+      - \"traefik.enable=true\"
+      - \"traefik.http.routers.dashboard.rule=Host(\`${AGENT_DASHBOARD_HOST}\`)\"
+      - \"traefik.http.routers.dashboard.entrypoints=${_ep}\"
+      - \"traefik.http.routers.dashboard.service=api@internal\""
+    [[ "$AGENT_TLS_TYPE" != "none" ]] && \
+      dashboard_block+="
+      - \"traefik.http.routers.dashboard.tls.certresolver=${AGENT_CERT_RESOLVER}\""
+    dashboard_block+="
+"
+  fi
+
+  local cs_service=""
+  if [[ "$AGENT_CS_MODE" == "install" ]]; then
+    cs_service="
+  crowdsec:
+    image: crowdsecurity/crowdsec:latest
+    container_name: crowdsec
+    restart: unless-stopped
+    networks:
+      - ${AGENT_NETWORK}
+    environment:
+      - BOUNCER_KEY_tma=${AGENT_CS_INSTALL_KEY}
+      - COLLECTIONS=crowdsecurity/traefik
+    volumes:
+      - crowdsec_data:/var/lib/crowdsec/data
+      - ./crowdsec/acquis.yaml:/etc/crowdsec/acquis.yaml:ro
+      - ./traefik/logs/access.log:/var/log/traefik/access.log:ro
+"
+  fi
+
+  local volumes_section=""
+  [[ "$AGENT_RESTART_METHOD" == "poison-pill" ]] && volumes_section+="  traefik-signals:
+"
+  [[ "$AGENT_CS_MODE" == "install" ]] && volumes_section+="  crowdsec_data:
+"
+  [[ -n "$volumes_section" ]] && volumes_section="
+volumes:
+${volumes_section}"
+
+  cat > "${AGENT_INSTALL_DIR}/docker-compose.yml" <<COMPOSE
+networks:
+  ${AGENT_NETWORK}:
+    external: false
+    name: ${AGENT_NETWORK}
+
+services:
+
+  traefik:
+    image: traefik:latest
+    container_name: traefik
+    restart: unless-stopped
+    networks:
+      - ${AGENT_NETWORK}
+    ports:
+      - ${traefik_ports}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik/traefik.yml:/traefik.yml:ro
+      - ./traefik/logs:/logs${traefik_acme_vol}
+${traefik_config_vol}
+${traefik_env_block}${dashboard_block}
+  traefik-manager-agent:
+    image: ghcr.io/chr0nzz/traefik-manager-agent:latest
+    container_name: traefik-manager-agent
+    restart: unless-stopped
+    networks:
+      - ${AGENT_NETWORK}
+    ports:
+      - "${AGENT_PORT}:8090"
+    environment:
+${env_block}
+    volumes:
+$(printf "%b" "$agent_vols")
+${agent_label_block}
+    depends_on:
+      - traefik
+${cs_service}
+${volumes_section}
+COMPOSE
+  ok "docker-compose.yml written"
+}
+
+install_agent_docker() {
+  if [[ "$AGENT_INSTALL_METHOD" == *"+ Traefik"* ]]; then
+    scaffold_agent_with_traefik
+    build_agent_traefik_static
+    build_agent_compose_with_traefik
+  else
+    scaffold_agent
+    build_agent_compose
+  fi
+  step "Starting services…"
+  local compose_cmd="docker compose"
+  docker compose version &>/dev/null || compose_cmd="docker-compose"
+  cd "$AGENT_INSTALL_DIR" && $compose_cmd pull && $compose_cmd up -d
+}
+
+install_agent_binary() {
+  local arch
+  case "$(uname -m)" in
+    x86_64)  arch="amd64" ;;
+    aarch64) arch="arm64" ;;
+    armv7l)  arch="armv7" ;;
+    *) die "Unsupported architecture: $(uname -m)" ;;
+  esac
+  local os
+  os=$(uname -s | tr '[:upper:]' '[:lower:]')
+  local bin_url="https://github.com/chr0nzz/traefik-manager/releases/latest/download/tma-${os}-${arch}"
+  step "Downloading TMA binary…"
+  curl -fsSL "$bin_url" -o /usr/local/bin/tma && chmod +x /usr/local/bin/tma
+
+  local env_lines=""
+  env_lines+="Environment=TMA_API_KEY=${AGENT_API_KEY}\n"
+  env_lines+="Environment=TRAEFIK_API_URL=${AGENT_TRAEFIK_URL}\n"
+  env_lines+="Environment=CONFIG_PATH=${AGENT_CONFIG_PATH}\n"
+  [[ "$AGENT_INSECURE_TLS" == "true" ]]     && env_lines+="Environment=TRAEFIK_INSECURE_SKIP_VERIFY=true\n"
+  [[ -n "$AGENT_STATIC_PATH" ]]             && env_lines+="Environment=STATIC_CONFIG_PATH=${AGENT_STATIC_PATH}\n"
+  [[ -n "$AGENT_RESTART_METHOD" ]]          && env_lines+="Environment=RESTART_METHOD=${AGENT_RESTART_METHOD}\n"
+  [[ -n "$AGENT_RESTART_METHOD" && -n "$AGENT_CONTAINER" ]] && env_lines+="Environment=TRAEFIK_CONTAINER=${AGENT_CONTAINER}\n"
+  [[ "$AGENT_RESTART_METHOD" == "proxy" && -n "$AGENT_DOCKER_HOST" ]]       && env_lines+="Environment=DOCKER_HOST=${AGENT_DOCKER_HOST}\n"
+  [[ "$AGENT_RESTART_METHOD" == "poison-pill" && -n "$AGENT_SIGNAL_FILE" ]] && env_lines+="Environment=SIGNAL_FILE_PATH=${AGENT_SIGNAL_FILE}\n"
+  [[ -n "$AGENT_ACME_PATH" ]]               && env_lines+="Environment=ACME_JSON_PATH=${AGENT_ACME_PATH}\n"
+  [[ -n "$AGENT_LOG_PATH" ]]                && env_lines+="Environment=ACCESS_LOG_PATH=${AGENT_LOG_PATH}\n"
+  [[ -n "$AGENT_PLUGINS_DIR" ]]             && env_lines+="Environment=PLUGINS_DIR=${AGENT_PLUGINS_DIR}\n"
+  if [[ "$AGENT_CS_MODE" == "connect" ]]; then
+    [[ -n "$AGENT_CS_URL" ]] && env_lines+="Environment=CROWDSEC_LAPI_URL=${AGENT_CS_URL}\n"
+    [[ -n "$AGENT_CS_KEY" ]] && env_lines+="Environment=CROWDSEC_API_KEY=${AGENT_CS_KEY}\n"
+  fi
+  if [[ "$AGENT_GIT_ENABLED" == "true" ]]; then
+    env_lines+="Environment=GIT_BACKUP_ENABLED=true\n"
+    [[ -n "$AGENT_GIT_REPO" ]]  && env_lines+="Environment=GIT_BACKUP_REPO=${AGENT_GIT_REPO}\n"
+    env_lines+="Environment=GIT_BACKUP_BRANCH=${AGENT_GIT_BRANCH}\n"
+    [[ -n "$AGENT_GIT_USER" ]]  && env_lines+="Environment=GIT_BACKUP_USERNAME=${AGENT_GIT_USER}\n"
+    [[ -n "$AGENT_GIT_TOKEN" ]] && env_lines+="Environment=GIT_BACKUP_TOKEN=${AGENT_GIT_TOKEN}\n"
+    env_lines+="Environment=GIT_BACKUP_AUTO_PUSH=${AGENT_GIT_AUTO}\n"
+  fi
+  env_lines+="Environment=TMA_PORT=${AGENT_PORT}\n"
+
+  step "Installing systemd service…"
+  cat > /etc/systemd/system/tma.service <<UNIT
+[Unit]
+Description=Traefik Manager Agent
+After=network.target
+
+[Service]
+Type=simple
+$(printf "%b" "$env_lines")ExecStart=/usr/local/bin/tma
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+  systemctl daemon-reload
+  systemctl enable --now tma
+}
+
+print_summary_agent() {
+  local ip
+  ip=$(hostname -I | awk '{print $1}')
+  echo ""
+  echo -e "${GREEN}${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+  echo -e "${GREEN}${BOLD}  Agent setup complete!${RESET}"
+  echo -e "${GREEN}${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+  echo ""
+  echo -e "  Agent URL     ${CYAN}http://${ip}:${AGENT_PORT}${RESET}"
+  echo -e "  Health check  ${DIM}curl http://${ip}:${AGENT_PORT}/health${RESET}"
+  if [[ "$AGENT_INSTALL_METHOD" == *"+ Traefik"* ]]; then
+    echo ""
+    local _ports="80"
+    [[ "$AGENT_HAS_WEBSECURE" == "true" ]] && _ports="80 + 443"
+    echo -e "  Traefik       ${DIM}running on ports ${_ports}${RESET}"
+    if [[ -n "$AGENT_HOST" ]]; then
+      local _agent_scheme="http"
+      [[ "$AGENT_HAS_WEBSECURE" == "true" ]] && _agent_scheme="https"
+      echo -e "  Agent (label) ${CYAN}${_agent_scheme}://${AGENT_HOST}${RESET}"
+    fi
+    if [[ -n "$AGENT_DASHBOARD_HOST" ]]; then
+      local _dash_scheme="http"
+      [[ "$AGENT_HAS_WEBSECURE" == "true" ]] && _dash_scheme="https"
+      echo -e "  Dashboard     ${CYAN}${_dash_scheme}://${AGENT_DASHBOARD_HOST}${RESET}"
+    fi
+    if [[ "$AGENT_CONFIG_LAYOUT" == "Single file"* ]]; then
+      echo -e "  Dynamic config  ${DIM}${AGENT_INSTALL_DIR}/traefik/config/dynamic.yml${RESET}"
+    else
+      echo -e "  Dynamic config  ${DIM}${AGENT_INSTALL_DIR}/traefik/config/*.yml${RESET}"
+    fi
+    [[ "$AGENT_TLS_TYPE" == "none" ]] && \
+      warn "TLS is disabled. Consider enabling it before exposing this publicly."
+    if [[ "$AGENT_EXTERNAL" == "true" ]]; then
+      [[ -n "$AGENT_HOST" ]] && \
+        warn "DNS A record for ${AGENT_HOST} must point to this server's IP."
+      [[ -n "$AGENT_DASHBOARD_HOST" ]] && \
+        warn "DNS A record for ${AGENT_DASHBOARD_HOST} must point to this server's IP."
+    fi
+  fi
+  echo ""
+  echo -e "  ${BOLD}Next steps:${RESET}"
+  echo -e "  ${DIM}1. In TM Settings -> Agents, click Add Agent${RESET}"
+  echo -e "  ${DIM}2. Enter the Agent URL above and the API key you configured${RESET}"
+  echo -e "  ${DIM}3. Use the server switcher in the TM nav bar to switch to this agent${RESET}"
+  echo ""
+  if [[ "$AGENT_INSTALL_METHOD" == "Binary"* ]]; then
+    echo -e "  ${CYAN}${BOLD}Updating${RESET}"
+    echo -e "  ${DIM}  curl -fsSL https://get-traefik.xyzlab.dev/agent | bash${RESET}"
+    echo ""
+  elif [[ -n "$AGENT_INSTALL_DIR" ]]; then
+    local compose_cmd="docker compose"
+    docker compose version &>/dev/null || compose_cmd="docker-compose"
+    echo -e "  ${CYAN}${BOLD}Updating${RESET}"
+    echo -e "  ${DIM}  cd ${AGENT_INSTALL_DIR} && ${compose_cmd} pull && ${compose_cmd} up -d${RESET}"
+    echo ""
+  fi
+}
+
 # ─── Main ─────────────────────────────────────────────────────────────────────
 
 main() {
   print_banner
-  gather_mode
 
-  if [[ "$INSTALL_MODE" == "Traefik + Traefik Manager"* ]]; then
+  if [[ "${TMA_INSTALL:-}" == "1" ]]; then
+    INSTALL_MODE="Traefik Manager Agent"
+    DEPLOY_METHOD="Agent"
+  else
+    gather_mode
+  fi
+
+  if [[ "$INSTALL_MODE" == "Traefik Manager Agent" ]]; then
+    gather_agent
+    [[ "$AGENT_INSTALL_METHOD" == "Binary"* ]] && check_native_deps || check_docker
+    [[ "$AGENT_INSTALL_METHOD" == "Binary"* ]] && install_agent_binary || install_agent_docker
+    print_summary_agent
+
+  elif [[ "$INSTALL_MODE" == "Traefik + Traefik Manager"* ]]; then
     check_docker
     gather_full_stack
     scaffold_full
