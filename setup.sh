@@ -17,7 +17,7 @@ EOF
 
 set -euo pipefail
 
-SCRIPT_VERSION="1.5"
+SCRIPT_VERSION="1.5.1"
 
 BOLD="\033[1m"
 DIM="\033[2m"
@@ -43,6 +43,8 @@ CROWDSEC_MODE=""
 CS_LAPI_URL=""
 CS_API_KEY=""
 CS_KEY=""
+CS_MACHINE_ID=""
+CS_MACHINE_PW=""
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -393,8 +395,11 @@ gather_full_stack() {
       "Connect to existing instance"
     if [[ "$CROWDSEC_MODE" == "Connect"* ]]; then
       ask "CrowdSec LAPI URL" "http://crowdsec:8080" CS_LAPI_URL
-      ask "CrowdSec API key" "" CS_API_KEY
+      ask "CrowdSec API key (bouncer, for decisions)" "" CS_API_KEY
       [[ -z "$CS_API_KEY" ]] && die "A CrowdSec API key is required."
+      info "Machine credentials are needed to view alerts and unban (the bouncer key cannot). Create one with: cscli machines add traefik-manager --auto"
+      ask "CrowdSec machine ID (optional, for alerts)" "" CS_MACHINE_ID
+      [[ -n "$CS_MACHINE_ID" ]] && ask "CrowdSec machine password" "" CS_MACHINE_PW
     fi
     if [[ "$CROWDSEC_MODE" == "Install"* && "$MOUNT_ACCESS_LOGS" != "true" ]]; then
       warn "CrowdSec reads Traefik access logs - enabling access log mount."
@@ -781,6 +786,8 @@ build_compose_full() {
     CS_KEY=$(openssl rand -hex 32)
     CS_LAPI_URL="http://crowdsec:8080"
     CS_API_KEY="$CS_KEY"
+    CS_MACHINE_ID="traefik-manager"
+    CS_MACHINE_PW=$(openssl rand -hex 24)
   fi
 
   local tls_label_traefik="" tls_label_tm=""
@@ -919,6 +926,11 @@ volumes:"
   if [[ "$ADD_CROWDSEC" == "true" ]]; then
     crowdsec_env="      - CROWDSEC_LAPI_URL=${CS_LAPI_URL}
       - CROWDSEC_API_KEY=${CS_API_KEY}"
+    if [[ -n "$CS_MACHINE_ID" && -n "$CS_MACHINE_PW" ]]; then
+      crowdsec_env="${crowdsec_env}
+      - CROWDSEC_MACHINE_ID=${CS_MACHINE_ID}
+      - CROWDSEC_MACHINE_PASSWORD=${CS_MACHINE_PW}"
+    fi
   fi
 
   local crowdsec_service=""
@@ -1294,6 +1306,21 @@ start_docker() {
   step "Starting services"
   $COMPOSE_CMD up -d
   ok "Services started"
+
+  if [[ "$ADD_CROWDSEC" == "true" && "$CROWDSEC_MODE" == "Install"* && -n "$CS_MACHINE_ID" && -n "$CS_MACHINE_PW" ]]; then
+    step "Registering CrowdSec machine for alerts"
+    local i
+    for i in $(seq 1 30); do
+      if docker exec crowdsec cscli lapi status >/dev/null 2>&1; then break; fi
+      sleep 2
+    done
+    if docker exec crowdsec cscli machines add "$CS_MACHINE_ID" --password "$CS_MACHINE_PW" --force >/dev/null 2>&1; then
+      ok "CrowdSec machine '${CS_MACHINE_ID}' registered (enables the Alerts view)"
+    else
+      warn "Could not auto-register the CrowdSec machine. Run manually once CrowdSec is up:"
+      echo -e "  ${DIM}docker exec crowdsec cscli machines add ${CS_MACHINE_ID} --password '${CS_MACHINE_PW}' --force${RESET}"
+    fi
+  fi
 }
 
 # ─── Fetch temp password ──────────────────────────────────────────────────────
@@ -1408,10 +1435,14 @@ print_summary_full() {
       echo -e "  ${DIM}Mode            installed as part of this stack${RESET}"
       echo -e "  ${DIM}LAPI URL        http://crowdsec:8080${RESET}"
       echo -e "  ${DIM}Bouncer key     ${CS_KEY}${RESET}"
+      echo -e "  ${DIM}Machine ID      ${CS_MACHINE_ID}${RESET}"
+      echo -e "  ${DIM}Machine pass    ${CS_MACHINE_PW}${RESET}"
       info "Enable the CrowdSec tab in Traefik Manager under Settings to view decisions and alerts."
     else
       echo -e "  ${DIM}Mode            connected to existing instance${RESET}"
       echo -e "  ${DIM}LAPI URL        ${CS_LAPI_URL}${RESET}"
+      [[ -n "$CS_MACHINE_ID" ]] && echo -e "  ${DIM}Machine ID      ${CS_MACHINE_ID}${RESET}"
+      [[ -z "$CS_MACHINE_ID" ]] && info "Alerts need machine credentials - add CROWDSEC_MACHINE_ID / CROWDSEC_MACHINE_PASSWORD later in Settings or env."
       info "Enable the CrowdSec tab in Traefik Manager under Settings to view decisions and alerts."
     fi
   fi
