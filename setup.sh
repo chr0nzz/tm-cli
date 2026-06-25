@@ -17,7 +17,7 @@ EOF
 
 set -euo pipefail
 
-SCRIPT_VERSION="1.5.1"
+SCRIPT_VERSION="1.6.0"
 
 BOLD="\033[1m"
 DIM="\033[2m"
@@ -1927,6 +1927,7 @@ build_agent_env() {
 build_agent_vols() {
   local lines=""
   lines+="      - ${AGENT_CONFIG_PATH}:${AGENT_CONFIG_PATH}\n"
+  lines+="      - ./backups:/app/backups\n"
   [[ -n "$AGENT_STATIC_PATH" ]]  && lines+="      - ${AGENT_STATIC_PATH}:${AGENT_STATIC_PATH}\n"
   [[ -n "$AGENT_ACME_PATH" ]]    && lines+="      - ${AGENT_ACME_PATH}:${AGENT_ACME_PATH}:ro\n"
   [[ -n "$AGENT_LOG_PATH" ]]     && lines+="      - ${AGENT_LOG_PATH}:${AGENT_LOG_PATH}:ro\n"
@@ -1939,6 +1940,7 @@ build_agent_vols() {
 scaffold_agent() {
   step "Creating install directory"
   mkdir -p "${AGENT_INSTALL_DIR}"
+  mkdir -p "${AGENT_INSTALL_DIR}/backups"
   if [[ "$AGENT_CS_MODE" == "install" ]]; then
     mkdir -p "${AGENT_INSTALL_DIR}/crowdsec"
     cat > "${AGENT_INSTALL_DIR}/crowdsec/acquis.yaml" <<'ACQUIS'
@@ -1956,6 +1958,7 @@ scaffold_agent_with_traefik() {
   step "Creating directory structure at ${AGENT_INSTALL_DIR}"
   mkdir -p "${AGENT_INSTALL_DIR}/traefik/config"
   mkdir -p "${AGENT_INSTALL_DIR}/traefik/logs"
+  mkdir -p "${AGENT_INSTALL_DIR}/backups"
   touch "${AGENT_INSTALL_DIR}/traefik/logs/access.log"
   if [[ "$AGENT_TLS_TYPE" != "none" ]]; then
     touch "${AGENT_INSTALL_DIR}/traefik/acme.json"
@@ -2116,6 +2119,7 @@ build_agent_compose_with_traefik() {
 
   local agent_vols=""
   agent_vols+="$agent_config_vol"
+  agent_vols+="      - ./backups:/app/backups\n"
   agent_vols+="      - ./traefik/logs/access.log:/var/log/traefik/access.log:ro\n"
   [[ "$AGENT_TLS_TYPE" != "none" ]] && agent_vols+="      - ./traefik/acme.json:/etc/traefik/acme.json:ro\n"
   [[ -n "$AGENT_PLUGINS_DIR" ]] && agent_vols+="      - ${AGENT_PLUGINS_DIR}:${AGENT_PLUGINS_DIR}:ro\n"
