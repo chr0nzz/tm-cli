@@ -31,6 +31,9 @@ INSTALL_DIR="${HOME}/traefik-stack"
 COMPOSE_CMD=""
 INSTALL_MODE=""
 DEPLOY_METHOD=""
+DOMAIN=""
+TRAEFIK_DASHBOARD_HOST=""
+TM_HOST=""
 RESTART_METHOD=""
 TRAEFIK_CONTAINER="traefik"
 TRAEFIK_SYSTEMD="false"
@@ -333,59 +336,67 @@ gather_restart_method_docker() {
 
 # ─── Full stack config ────────────────────────────────────────────────────────
 
-gather_full_stack() {
-  step "General"
-  echo -e "  ${DIM}Press Enter to accept defaults shown in brackets.${RESET}\n"
-
+_full_sec_general() {
+  sep; echo ""
+  echo -e "  ${BOLD}-- General --${RESET}"
   ask "Install directory" "$INSTALL_DIR" INSTALL_DIR
+}
 
-  sep
-  echo ""
-  echo -e "  ${BOLD}Deployment type${RESET}"
+_full_sec_deploy() {
+  sep; echo ""
+  echo -e "  ${BOLD}-- Deployment type --${RESET}"
   info "Internal = LAN / VPN / Tailscale only.  External = reachable from the internet."
   ask_choice "Where will this be accessed from?" DEPLOYMENT_TYPE \
     "External (internet-facing)" \
     "Internal only (LAN / VPN / Tailscale)"
-
   if [[ "$DEPLOYMENT_TYPE" == "External"* ]]; then EXTERNAL=true
   else EXTERNAL=false; fi
+}
 
-  sep
-  echo ""
+_full_sec_domain() {
+  sep; echo ""
   echo -e "  ${BOLD}-- Domain --${RESET}"
-  ask "Your domain (e.g. example.com)" "" DOMAIN
-  [[ -z "$DOMAIN" ]] && die "A domain is required."
-  ask "Traefik dashboard subdomain" "traefik.$DOMAIN" TRAEFIK_DASHBOARD_HOST
-  ask "Traefik Manager subdomain"   "manager.$DOMAIN" TM_HOST
+  while true; do
+    ask "Your domain (e.g. example.com)" "$DOMAIN" DOMAIN
+    [[ -n "$DOMAIN" ]] && break
+    warn "A domain is required."
+  done
+  ask "Traefik dashboard subdomain" "${TRAEFIK_DASHBOARD_HOST:-traefik.$DOMAIN}" TRAEFIK_DASHBOARD_HOST
+  ask "Traefik Manager subdomain"   "${TM_HOST:-manager.$DOMAIN}" TM_HOST
   ask_yn "Enable Traefik API dashboard UI?" "y" ENABLE_DASHBOARD
+}
 
-  sep
-  echo ""
+_full_sec_tls() {
+  sep; echo ""
   echo -e "  ${BOLD}-- TLS / Certificates --${RESET}"
   gather_tls_method
+}
 
-  sep
-  echo ""
+_full_sec_config() {
+  sep; echo ""
   echo -e "  ${BOLD}-- Dynamic Config --${RESET}"
   info "Single file is simpler. Directory (one .yml per service) is easier at scale."
   ask_choice "Dynamic config layout" CONFIG_LAYOUT \
     "Single file (dynamic.yml)" \
     "Directory - one .yml file per service"
+}
 
-  sep
-  echo ""
+_full_sec_mounts() {
+  sep; echo ""
   echo -e "  ${BOLD}-- Optional Mounts --${RESET}"
   info "Expose extra Traefik data to Traefik Manager for richer visibility."
   ask_yn "Mount access logs?"                      "y" MOUNT_ACCESS_LOGS
   ask_yn "Mount SSL certs (acme.json)?"              "y" MOUNT_CERTS
   ask_yn "Mount Traefik static config (traefik.yml)?" "n" MOUNT_STATIC_CONFIG
-
   if [[ "$MOUNT_STATIC_CONFIG" == "true" ]]; then
     gather_restart_method_docker "false"
+  else
+    RESTART_METHOD=""
   fi
+}
 
-  sep
-  echo ""
+_full_sec_crowdsec() {
+  sep; echo ""
   echo -e "  ${BOLD}-- CrowdSec IDS --${RESET}"
   info "CrowdSec detects intrusions and bans malicious IPs. Visible in the CrowdSec tab in Traefik Manager."
   ask_yn "Add CrowdSec?" "n" ADD_CROWDSEC
@@ -395,8 +406,11 @@ gather_full_stack() {
       "Connect to existing instance"
     if [[ "$CROWDSEC_MODE" == "Connect"* ]]; then
       ask "CrowdSec LAPI URL" "http://crowdsec:8080" CS_LAPI_URL
-      ask "CrowdSec API key (bouncer, for decisions)" "" CS_API_KEY
-      [[ -z "$CS_API_KEY" ]] && die "A CrowdSec API key is required."
+      while true; do
+        ask "CrowdSec API key (bouncer, for decisions)" "$CS_API_KEY" CS_API_KEY
+        [[ -n "$CS_API_KEY" ]] && break
+        warn "A CrowdSec API key is required."
+      done
       info "Machine credentials are needed to view alerts and unban (the bouncer key cannot). Create one with: cscli machines add traefik-manager --auto"
       ask "CrowdSec machine ID (optional, for alerts)" "" CS_MACHINE_ID
       [[ -n "$CS_MACHINE_ID" ]] && ask "CrowdSec machine password" "" CS_MACHINE_PW
@@ -405,13 +419,83 @@ gather_full_stack() {
       warn "CrowdSec reads Traefik access logs - enabling access log mount."
       MOUNT_ACCESS_LOGS="true"
     fi
+  else
+    CROWDSEC_MODE=""
   fi
+}
 
-  sep
-  echo ""
+_full_sec_network() {
+  sep; echo ""
   echo -e "  ${BOLD}-- Docker Network --${RESET}"
   ask "Docker network name"       "traefik-net" DOCKER_NETWORK
   ask "Traefik internal API port" "8080"        TRAEFIK_API_PORT
+}
+
+_full_build_section_list() {
+  FULL_SEC_LABELS=("General" "Deployment type" "Domain" "TLS / Certificates" "Dynamic config" "Optional mounts" "CrowdSec" "Docker network")
+  FULL_SEC_FNS=(_full_sec_general _full_sec_deploy _full_sec_domain _full_sec_tls _full_sec_config _full_sec_mounts _full_sec_crowdsec _full_sec_network)
+}
+
+_full_show_review() {
+  echo ""
+  echo -e "  ${BOLD}Review configuration${RESET}"
+  echo -e "  ${DIM}────────────────────────────────────────────────────────${RESET}"
+  local _i=1
+  for _lbl in "${FULL_SEC_LABELS[@]}"; do
+    local _val=""
+    case "$_lbl" in
+      "General") _val="$INSTALL_DIR" ;;
+      "Deployment type") [[ "$EXTERNAL" == "true" ]] && _val="external (internet-facing)" || _val="internal (LAN / VPN)" ;;
+      "Domain")
+        _val="$DOMAIN  dash:${TRAEFIK_DASHBOARD_HOST}  tm:${TM_HOST}"
+        [[ "$ENABLE_DASHBOARD" != "true" ]] && _val+="  dashboard:off"
+        ;;
+      "TLS / Certificates")
+        if [[ "$TLS_TYPE" == "none" ]]; then _val="none (HTTP only)"
+        elif [[ "$TLS_TYPE" == "dns" ]]; then _val="Let's Encrypt DNS (${DNS_PROVIDER})  ${ACME_EMAIL}"
+        else _val="Let's Encrypt HTTP  ${ACME_EMAIL}"; fi
+        ;;
+      "Dynamic config") _val="$(echo "$CONFIG_LAYOUT" | grep -o 'Single file\|Directory')" ;;
+      "Optional mounts")
+        local _m=""
+        [[ "$MOUNT_ACCESS_LOGS" == "true" ]]  && _m+="logs "
+        [[ "$MOUNT_CERTS" == "true" ]]         && _m+="certs "
+        [[ "$MOUNT_STATIC_CONFIG" == "true" ]] && _m+="static(restart:${RESTART_METHOD})"
+        _val="${_m:-(none)}"
+        ;;
+      "CrowdSec")
+        case "$CROWDSEC_MODE" in
+          Install*) _val="install alongside" ;;
+          Connect*) _val="connect  ${CS_LAPI_URL}" ;;
+          *)        _val="disabled" ;;
+        esac
+        ;;
+      "Docker network") _val="${DOCKER_NETWORK}  api:${TRAEFIK_API_PORT}" ;;
+    esac
+    printf "  \033[1;36m%2d\033[0m  \033[2m%-20s\033[0m  %s\n" "$_i" "$_lbl" "$_val"
+    (( _i++ ))
+  done
+  echo -e "  ${DIM}────────────────────────────────────────────────────────${RESET}"
+}
+
+gather_full_stack() {
+  step "Traefik + Traefik Manager Setup"
+  echo -e "  ${DIM}Press Enter to accept defaults shown in brackets.${RESET}"
+
+  _full_build_section_list
+  for _fn in "${FULL_SEC_FNS[@]}"; do "$_fn"; done
+
+  while true; do
+    _full_show_review
+    echo ""
+    echo -ne "  ${BOLD}Edit a section (1-${#FULL_SEC_FNS[@]}) or Enter to install:${RESET} "
+    local _choice
+    read -r _choice </dev/tty
+    [[ -z "$_choice" ]] && break
+    if [[ "$_choice" =~ ^[0-9]+$ ]] && (( _choice >= 1 && _choice <= ${#FULL_SEC_FNS[@]} )); then
+      "${FULL_SEC_FNS[$((_choice-1))]}"
+    fi
+  done
 
   if [[ "$EXTERNAL" == "true" ]]; then
     sep
@@ -453,8 +537,11 @@ gather_tls_method() {
   DNS_PROVIDER=""
 
   if [[ "$CERT_METHOD" != "No TLS"* ]]; then
-    ask "Email for Let's Encrypt" "" ACME_EMAIL
-    [[ -z "$ACME_EMAIL" ]] && die "An email is required for Let's Encrypt."
+    while true; do
+      ask "Email for Let's Encrypt" "${ACME_EMAIL:-}" ACME_EMAIL
+      [[ -n "$ACME_EMAIL" ]] && break
+      warn "An email is required for Let's Encrypt."
+    done
   fi
 
   case "$CERT_METHOD" in
@@ -512,14 +599,14 @@ gather_tls_method() {
 
 # ─── TM-only Docker config ────────────────────────────────────────────────────
 
-gather_tm_docker() {
-  step "Traefik Manager - Docker Setup"
-  echo -e "  ${DIM}Press Enter to accept defaults shown in brackets.${RESET}\n"
-
+_tmd_sec_general() {
+  sep; echo ""
+  echo -e "  ${BOLD}-- General --${RESET}"
   ask "Install directory" "${HOME}/traefik-manager" INSTALL_DIR
+}
 
-  sep
-  echo ""
+_tmd_sec_network() {
+  sep; echo ""
   echo -e "  ${BOLD}-- Network --${RESET}"
   ask_yn "Connect to an existing Traefik Docker network?" "y" USE_TRAEFIK_NETWORK
   if [[ "$USE_TRAEFIK_NETWORK" == "true" ]]; then
@@ -529,14 +616,18 @@ gather_tm_docker() {
     ask "Docker network name" "traefik-manager-net" DOCKER_NETWORK
     NETWORK_EXTERNAL="false"
   fi
+}
 
-  sep
-  echo ""
+_tmd_sec_access() {
+  sep; echo ""
   echo -e "  ${BOLD}-- Access --${RESET}"
   ask_yn "Expose via Traefik labels (requires Traefik on same network)?" "y" USE_TRAEFIK_LABELS
   if [[ "$USE_TRAEFIK_LABELS" == "true" ]]; then
-    ask "Traefik Manager domain (e.g. manager.example.com)" "" TM_HOST
-    [[ -z "$TM_HOST" ]] && die "A domain is required for Traefik labels."
+    while true; do
+      ask "Traefik Manager domain (e.g. manager.example.com)" "$TM_HOST" TM_HOST
+      [[ -n "$TM_HOST" ]] && break
+      warn "A domain is required for Traefik labels."
+    done
     gather_tls_method
     TM_PORT=""
   else
@@ -545,17 +636,19 @@ gather_tm_docker() {
     CERT_RESOLVER=""
     TRAEFIK_ENTRYPOINT="web"
   fi
+}
 
-  sep
-  echo ""
+_tmd_sec_config() {
+  sep; echo ""
   echo -e "  ${BOLD}-- Dynamic Config --${RESET}"
   info "Single file is simpler. Directory (one .yml per service) is easier at scale."
   ask_choice "Dynamic config layout" CONFIG_LAYOUT \
     "Single file (dynamic.yml)" \
     "Directory - one .yml file per service"
+}
 
-  sep
-  echo ""
+_tmd_sec_mounts() {
+  sep; echo ""
   echo -e "  ${BOLD}-- Optional Mounts --${RESET}"
   info "Expose extra Traefik data to Traefik Manager for richer visibility."
   ask_yn "Mount access logs?"           "y" MOUNT_ACCESS_LOGS
@@ -570,40 +663,104 @@ gather_tm_docker() {
   if [[ "$MOUNT_STATIC_CONFIG" == "true" ]]; then
     ask "Path to traefik.yml" "/etc/traefik/traefik.yml" TRAEFIK_YML_HOST_PATH
     gather_restart_method_docker "true"
+  else
+    RESTART_METHOD=""
   fi
+}
+
+_tmd_build_section_list() {
+  TMD_SEC_LABELS=("General" "Network" "Access" "Dynamic config" "Optional mounts")
+  TMD_SEC_FNS=(_tmd_sec_general _tmd_sec_network _tmd_sec_access _tmd_sec_config _tmd_sec_mounts)
+}
+
+_tmd_show_review() {
+  echo ""
+  echo -e "  ${BOLD}Review configuration${RESET}"
+  echo -e "  ${DIM}────────────────────────────────────────────────────────${RESET}"
+  local _i=1
+  for _lbl in "${TMD_SEC_LABELS[@]}"; do
+    local _val=""
+    case "$_lbl" in
+      "General") _val="$INSTALL_DIR" ;;
+      "Network")
+        [[ "$NETWORK_EXTERNAL" == "true" ]] && _val="${DOCKER_NETWORK} (existing)" || _val="${DOCKER_NETWORK} (new)"
+        ;;
+      "Access")
+        if [[ "$USE_TRAEFIK_LABELS" == "true" ]]; then
+          if [[ "$TLS_TYPE" == "none" ]]; then _val="via Traefik  ${TM_HOST}  no TLS"
+          elif [[ "$TLS_TYPE" == "dns" ]]; then _val="via Traefik  ${TM_HOST}  TLS:dns(${DNS_PROVIDER})"
+          else _val="via Traefik  ${TM_HOST}  TLS:http"; fi
+        else
+          _val="host port :${TM_PORT}"
+        fi
+        ;;
+      "Dynamic config") _val="$(echo "$CONFIG_LAYOUT" | grep -o 'Single file\|Directory')" ;;
+      "Optional mounts")
+        local _m=""
+        [[ "$MOUNT_ACCESS_LOGS" == "true" ]]  && _m+="logs "
+        [[ "$MOUNT_CERTS" == "true" ]]         && _m+="certs "
+        [[ "$MOUNT_STATIC_CONFIG" == "true" ]] && _m+="static(restart:${RESTART_METHOD})"
+        _val="${_m:-(none)}"
+        ;;
+    esac
+    printf "  \033[1;36m%2d\033[0m  \033[2m%-20s\033[0m  %s\n" "$_i" "$_lbl" "$_val"
+    (( _i++ ))
+  done
+  echo -e "  ${DIM}────────────────────────────────────────────────────────${RESET}"
+}
+
+gather_tm_docker() {
+  step "Traefik Manager - Docker Setup"
+  echo -e "  ${DIM}Press Enter to accept defaults shown in brackets.${RESET}"
+
+  _tmd_build_section_list
+  for _fn in "${TMD_SEC_FNS[@]}"; do "$_fn"; done
+
+  while true; do
+    _tmd_show_review
+    echo ""
+    echo -ne "  ${BOLD}Edit a section (1-${#TMD_SEC_FNS[@]}) or Enter to install:${RESET} "
+    local _choice
+    read -r _choice </dev/tty
+    [[ -z "$_choice" ]] && break
+    if [[ "$_choice" =~ ^[0-9]+$ ]] && (( _choice >= 1 && _choice <= ${#TMD_SEC_FNS[@]} )); then
+      "${TMD_SEC_FNS[$((_choice-1))]}"
+    fi
+  done
 }
 
 # ─── TM-only native config ────────────────────────────────────────────────────
 
-gather_tm_native() {
-  step "Traefik Manager - Linux Service Setup"
-  echo -e "  ${DIM}Press Enter to accept defaults shown in brackets.${RESET}\n"
-
+_tmn_sec_general() {
+  sep; echo ""
+  echo -e "  ${BOLD}-- General --${RESET}"
   ask "Install directory" "/opt/traefik-manager" NATIVE_INSTALL_DIR
   ask "Data directory"    "/var/lib/traefik-manager" NATIVE_DATA_DIR
   ask "Port"              "5000" TM_PORT
+}
 
-  sep
-  echo ""
+_tmn_sec_user() {
+  sep; echo ""
   echo -e "  ${BOLD}-- Service User --${RESET}"
   ask_yn "Create a dedicated system user (traefik-manager)?" "y" CREATE_SVC_USER
+}
 
-  sep
-  echo ""
+_tmn_sec_config() {
+  sep; echo ""
   echo -e "  ${BOLD}-- Dynamic Config --${RESET}"
   info "Single file is simpler. Directory (one .yml per service) is easier at scale."
   ask_choice "Dynamic config layout" CONFIG_LAYOUT \
     "Single file (dynamic.yml)" \
     "Directory - one .yml file per service"
-
   if [[ "$CONFIG_LAYOUT" == "Single file"* ]]; then
     ask "Path to Traefik dynamic config file" "/etc/traefik/dynamic.yml" NATIVE_CONFIG_PATH
   else
     ask "Path to Traefik dynamic config directory" "/etc/traefik/conf.d" NATIVE_CONFIG_DIR
   fi
+}
 
-  sep
-  echo ""
+_tmn_sec_mounts() {
+  sep; echo ""
   echo -e "  ${BOLD}-- Optional Mounts --${RESET}"
   info "Expose extra Traefik data to Traefik Manager for richer visibility."
   ask_yn "Mount SSL certs (acme.json)?" "y" MOUNT_CERTS
@@ -630,6 +787,7 @@ gather_tm_native() {
       ask "Traefik service name" "traefik" TRAEFIK_SERVICE_NAME
       ask "Signal file path" "/var/lib/traefik-manager/signals/restart.sig" SIGNAL_FILE_PATH
     else
+      TRAEFIK_SYSTEMD="false"
       info "Choose how TM should restart Traefik after saving static config changes."
       local choice
       ask_choice "Restart method" choice \
@@ -646,7 +804,65 @@ gather_tm_native() {
         ask "Signal file path" "/var/lib/traefik-manager/signals/restart.sig" SIGNAL_FILE_PATH
       fi
     fi
+  else
+    RESTART_METHOD=""
+    TRAEFIK_SYSTEMD="false"
   fi
+}
+
+_tmn_build_section_list() {
+  TMN_SEC_LABELS=("General" "Service user" "Dynamic config" "Optional mounts")
+  TMN_SEC_FNS=(_tmn_sec_general _tmn_sec_user _tmn_sec_config _tmn_sec_mounts)
+}
+
+_tmn_show_review() {
+  echo ""
+  echo -e "  ${BOLD}Review configuration${RESET}"
+  echo -e "  ${DIM}────────────────────────────────────────────────────────${RESET}"
+  local _i=1
+  for _lbl in "${TMN_SEC_LABELS[@]}"; do
+    local _val=""
+    case "$_lbl" in
+      "General") _val="${NATIVE_INSTALL_DIR}  data:${NATIVE_DATA_DIR}  :${TM_PORT}" ;;
+      "Service user")
+        [[ "$CREATE_SVC_USER" == "true" ]] && _val="dedicated (traefik-manager)" || _val="current user"
+        ;;
+      "Dynamic config")
+        if [[ "$CONFIG_LAYOUT" == "Single file"* ]]; then _val="Single file  ${NATIVE_CONFIG_PATH}"
+        else _val="Directory  ${NATIVE_CONFIG_DIR}"; fi
+        ;;
+      "Optional mounts")
+        local _m=""
+        [[ "$MOUNT_CERTS" == "true" ]]         && _m+="certs "
+        [[ "$MOUNT_ACCESS_LOGS" == "true" ]]  && _m+="logs "
+        [[ "$MOUNT_STATIC_CONFIG" == "true" ]] && _m+="static(restart:${RESTART_METHOD})"
+        _val="${_m:-(none)}"
+        ;;
+    esac
+    printf "  \033[1;36m%2d\033[0m  \033[2m%-20s\033[0m  %s\n" "$_i" "$_lbl" "$_val"
+    (( _i++ ))
+  done
+  echo -e "  ${DIM}────────────────────────────────────────────────────────${RESET}"
+}
+
+gather_tm_native() {
+  step "Traefik Manager - Linux Service Setup"
+  echo -e "  ${DIM}Press Enter to accept defaults shown in brackets.${RESET}"
+
+  _tmn_build_section_list
+  for _fn in "${TMN_SEC_FNS[@]}"; do "$_fn"; done
+
+  while true; do
+    _tmn_show_review
+    echo ""
+    echo -ne "  ${BOLD}Edit a section (1-${#TMN_SEC_FNS[@]}) or Enter to install:${RESET} "
+    local _choice
+    read -r _choice </dev/tty
+    [[ -z "$_choice" ]] && break
+    if [[ "$_choice" =~ ^[0-9]+$ ]] && (( _choice >= 1 && _choice <= ${#TMN_SEC_FNS[@]} )); then
+      "${TMN_SEC_FNS[$((_choice-1))]}"
+    fi
+  done
 }
 
 # ─── Full stack scaffold ──────────────────────────────────────────────────────
