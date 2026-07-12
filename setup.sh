@@ -17,7 +17,7 @@ EOF
 
 set -euo pipefail
 
-SCRIPT_VERSION="1.6.0"
+SCRIPT_VERSION="1.7.0"
 
 BOLD="\033[1m"
 DIM="\033[2m"
@@ -93,6 +93,15 @@ ask() {
   else
     printf -v "$var_name" '%s' "$input"
   fi
+}
+
+ask_secret() {
+  local prompt="$1" var_name="$2"
+  echo -ne "  ${BOLD}${prompt}${RESET}: "
+  local input=''
+  read -rs input </dev/tty
+  echo ""
+  printf -v "$var_name" '%s' "$input"
 }
 
 ask_yn() {
@@ -407,13 +416,13 @@ _full_sec_crowdsec() {
     if [[ "$CROWDSEC_MODE" == "Connect"* ]]; then
       ask "CrowdSec LAPI URL" "http://crowdsec:8080" CS_LAPI_URL
       while true; do
-        ask "CrowdSec API key (bouncer, for decisions)" "$CS_API_KEY" CS_API_KEY
+        ask_secret "CrowdSec API key (bouncer, for decisions)" CS_API_KEY
         [[ -n "$CS_API_KEY" ]] && break
         warn "A CrowdSec API key is required."
       done
       info "Machine credentials are needed to view alerts and unban (the bouncer key cannot). Create one with: cscli machines add traefik-manager --auto"
       ask "CrowdSec machine ID (optional, for alerts)" "" CS_MACHINE_ID
-      [[ -n "$CS_MACHINE_ID" ]] && ask "CrowdSec machine password" "" CS_MACHINE_PW
+      [[ -n "$CS_MACHINE_ID" ]] && ask_secret "CrowdSec machine password" CS_MACHINE_PW
     fi
     if [[ "$CROWDSEC_MODE" == "Install"* && "$MOUNT_ACCESS_LOGS" != "true" ]]; then
       warn "CrowdSec reads Traefik access logs - enabling access log mount."
@@ -551,14 +560,14 @@ gather_tls_method() {
     *"Cloudflare"*)
       TLS_TYPE="dns"; CERT_RESOLVER="letsencrypt"; TRAEFIK_ENTRYPOINT="websecure"
       DNS_PROVIDER="cloudflare"
-      ask "Cloudflare API Token (DNS-scoped token)" "" CF_DNS_API_TOKEN
+      ask_secret "Cloudflare API Token (DNS-scoped token)" CF_DNS_API_TOKEN
       DNS_ENV_BLOCK="      - CF_DNS_API_TOKEN=${CF_DNS_API_TOKEN}"
       ;;
     *"Route 53"*)
       TLS_TYPE="dns"; CERT_RESOLVER="letsencrypt"; TRAEFIK_ENTRYPOINT="websecure"
       DNS_PROVIDER="route53"
       ask "AWS Access Key ID"     "" AWS_ACCESS_KEY_ID
-      ask "AWS Secret Access Key" "" AWS_SECRET_ACCESS_KEY
+      ask_secret "AWS Secret Access Key" AWS_SECRET_ACCESS_KEY
       ask "AWS Region"            "us-east-1" AWS_REGION
       DNS_ENV_BLOCK="      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
@@ -567,27 +576,27 @@ gather_tls_method() {
     *"DigitalOcean"*)
       TLS_TYPE="dns"; CERT_RESOLVER="letsencrypt"; TRAEFIK_ENTRYPOINT="websecure"
       DNS_PROVIDER="digitalocean"
-      ask "DigitalOcean API Token" "" DO_AUTH_TOKEN
+      ask_secret "DigitalOcean API Token" DO_AUTH_TOKEN
       DNS_ENV_BLOCK="      - DO_AUTH_TOKEN=${DO_AUTH_TOKEN}"
       ;;
     *"Namecheap"*)
       TLS_TYPE="dns"; CERT_RESOLVER="letsencrypt"; TRAEFIK_ENTRYPOINT="websecure"
       DNS_PROVIDER="namecheap"
       ask "Namecheap API User" "" NAMECHEAP_API_USER
-      ask "Namecheap API Key"  "" NAMECHEAP_API_KEY
+      ask_secret "Namecheap API Key"  NAMECHEAP_API_KEY
       DNS_ENV_BLOCK="      - NAMECHEAP_API_USER=${NAMECHEAP_API_USER}
       - NAMECHEAP_API_KEY=${NAMECHEAP_API_KEY}"
       ;;
     *"DuckDNS"*)
       TLS_TYPE="dns"; CERT_RESOLVER="letsencrypt"; TRAEFIK_ENTRYPOINT="websecure"
       DNS_PROVIDER="duckdns"
-      ask "DuckDNS Token" "" DUCKDNS_TOKEN
+      ask_secret "DuckDNS Token" DUCKDNS_TOKEN
       DNS_ENV_BLOCK="      - DUCKDNS_TOKEN=${DUCKDNS_TOKEN}"
       ;;
     *"deSEC"*)
       TLS_TYPE="dns"; CERT_RESOLVER="letsencrypt"; TRAEFIK_ENTRYPOINT="websecure"
       DNS_PROVIDER="desec"
-      ask "deSEC Token" "" DESEC_TOKEN
+      ask_secret "deSEC Token" DESEC_TOKEN
       DNS_ENV_BLOCK="      - DESEC_TOKEN=${DESEC_TOKEN}"
       ;;
     "No TLS"*)
@@ -1795,7 +1804,7 @@ _agent_sec_apikey() {
   info "Generate this in TM Settings -> Agents before running the script."
   while true; do
     echo -ne "  ${BOLD}API key (TMA_API_KEY):${RESET} "
-    read -r AGENT_API_KEY </dev/tty
+    read -rs AGENT_API_KEY </dev/tty; echo ""
     [[ -n "$AGENT_API_KEY" ]] && break
     warn "API key is required."
   done
@@ -1968,7 +1977,7 @@ _agent_sec_crowdsec() {
       AGENT_CS_INSTALL_KEY=""
       ask "LAPI URL" "http://crowdsec:8080" AGENT_CS_URL
       echo -ne "  ${BOLD}API key:${RESET} "
-      read -r AGENT_CS_KEY </dev/tty
+      read -rs AGENT_CS_KEY </dev/tty; echo ""
       ;;
     *)
       AGENT_CS_MODE="none"
@@ -1990,7 +1999,7 @@ _agent_sec_git() {
     ask "Branch" "main" AGENT_GIT_BRANCH
     ask "Username" "" AGENT_GIT_USER
     echo -ne "  ${BOLD}Access token:${RESET} "
-    read -r AGENT_GIT_TOKEN </dev/tty
+    read -rs AGENT_GIT_TOKEN </dev/tty; echo ""
     local _auto
     ask_choice "Auto-push on config change?" _auto "Yes" "No"
     [[ "$_auto" == "No" ]] && AGENT_GIT_AUTO="false" || AGENT_GIT_AUTO="true"
