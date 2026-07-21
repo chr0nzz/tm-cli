@@ -2477,9 +2477,7 @@ install_agent_docker() {
     build_agent_compose
   fi
   step "Starting services…"
-  local compose_cmd="docker compose"
-  docker compose version &>/dev/null || compose_cmd="docker-compose"
-  cd "$AGENT_INSTALL_DIR" && $compose_cmd pull && $compose_cmd up -d
+  cd "$AGENT_INSTALL_DIR" && $COMPOSE_CMD pull && $COMPOSE_CMD up -d
 }
 
 install_agent_binary() {
@@ -2592,10 +2590,8 @@ print_summary_agent() {
     echo -e "  ${DIM}  curl -fsSL https://get-traefik.xyzlab.dev/agent | bash${RESET}"
     echo ""
   elif [[ -n "$AGENT_INSTALL_DIR" ]]; then
-    local compose_cmd="docker compose"
-    docker compose version &>/dev/null || compose_cmd="docker-compose"
     echo -e "  ${CYAN}${BOLD}Updating${RESET}"
-    echo -e "  ${DIM}  cd ${AGENT_INSTALL_DIR} && ${compose_cmd} pull && ${compose_cmd} up -d${RESET}"
+    echo -e "  ${DIM}  cd ${AGENT_INSTALL_DIR} && ${COMPOSE_CMD} pull && ${COMPOSE_CMD} up -d${RESET}"
     echo ""
   fi
 }
