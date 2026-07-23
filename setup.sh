@@ -17,7 +17,7 @@ EOF
 
 set -euo pipefail
 
-SCRIPT_VERSION="1.7.0"
+SCRIPT_VERSION="1.7.3"
 
 BOLD="\033[1m"
 DIM="\033[2m"
@@ -2492,7 +2492,8 @@ install_agent_binary() {
   os=$(uname -s | tr '[:upper:]' '[:lower:]')
   local bin_url="https://github.com/chr0nzz/traefik-manager/releases/latest/download/tma-${os}-${arch}"
   step "Downloading TMA binary…"
-  curl -fsSL "$bin_url" -o /usr/local/bin/tma && chmod +x /usr/local/bin/tma
+  curl -fsSL "$bin_url" -o /usr/local/bin/tma || die "Failed to download the TMA binary from ${bin_url}"
+  chmod +x /usr/local/bin/tma
 
   local env_lines=""
   env_lines+="Environment=TMA_API_KEY=${AGENT_API_KEY}\n"
@@ -2529,7 +2530,8 @@ After=network.target
 
 [Service]
 Type=simple
-$(printf "%b" "$env_lines")ExecStart=/usr/local/bin/tma
+$(printf "%b" "$env_lines")
+ExecStart=/usr/local/bin/tma
 Restart=on-failure
 RestartSec=5
 
@@ -2610,8 +2612,13 @@ main() {
 
   if [[ "$INSTALL_MODE" == "Traefik Manager Agent" ]]; then
     gather_agent
-    [[ "$AGENT_INSTALL_METHOD" == "Binary"* ]] && check_native_deps || check_docker
-    [[ "$AGENT_INSTALL_METHOD" == "Binary"* ]] && install_agent_binary || install_agent_docker
+    if [[ "$AGENT_INSTALL_METHOD" == "Binary"* ]]; then
+      check_native_deps
+      install_agent_binary
+    else
+      check_docker
+      install_agent_docker
+    fi
     print_summary_agent
 
   elif [[ "$INSTALL_MODE" == "Traefik + Traefik Manager"* ]]; then
