@@ -2529,7 +2529,8 @@ After=network.target
 
 [Service]
 Type=simple
-$(printf "%b" "$env_lines")ExecStart=/usr/local/bin/tma
+$(printf "%b" "$env_lines")
+ExecStart=/usr/local/bin/tma
 Restart=on-failure
 RestartSec=5
 
@@ -2610,8 +2611,13 @@ main() {
 
   if [[ "$INSTALL_MODE" == "Traefik Manager Agent" ]]; then
     gather_agent
-    [[ "$AGENT_INSTALL_METHOD" == "Binary"* ]] && check_native_deps || check_docker
-    [[ "$AGENT_INSTALL_METHOD" == "Binary"* ]] && install_agent_binary || install_agent_docker
+    if [[ "$AGENT_INSTALL_METHOD" == "Binary"* ]]; then
+      check_native_deps
+      install_agent_binary
+    else
+      check_docker
+      install_agent_docker
+    fi
     print_summary_agent
 
   elif [[ "$INSTALL_MODE" == "Traefik + Traefik Manager"* ]]; then
