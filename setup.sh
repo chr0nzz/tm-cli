@@ -1752,6 +1752,8 @@ print_summary_native() {
 AGENT_INSTALL_METHOD=""
 AGENT_API_KEY=""
 AGENT_TRAEFIK_URL="http://traefik:8080"
+AGENT_TRAEFIK_USER=""
+AGENT_TRAEFIK_PASS=""
 AGENT_CONFIG_PATH="/app/config"
 AGENT_STATIC_PATH=""
 AGENT_INSECURE_TLS="false"
@@ -1820,6 +1822,15 @@ _agent_sec_traefik() {
     ask_yn "Skip TLS verification? (needed for self-signed / Cloudflare Origin certs)" "n" AGENT_INSECURE_TLS
   else
     AGENT_INSECURE_TLS="false"
+  fi
+  local _traefik_auth
+  ask_yn "Is the Traefik API behind basic auth (username / password)?" "n" _traefik_auth
+  if [[ "$_traefik_auth" == "true" ]]; then
+    ask "Traefik API username" "" AGENT_TRAEFIK_USER
+    ask_secret "Traefik API password" AGENT_TRAEFIK_PASS
+  else
+    AGENT_TRAEFIK_USER=""
+    AGENT_TRAEFIK_PASS=""
   fi
   local _mount_static
   ask_yn "Mount static config (traefik.yml)?" "n" _mount_static
@@ -2120,6 +2131,8 @@ build_agent_env() {
   local lines=""
   lines+="      - TMA_API_KEY=${AGENT_API_KEY}\n"
   lines+="      - TRAEFIK_API_URL=${AGENT_TRAEFIK_URL}\n"
+  [[ -n "$AGENT_TRAEFIK_USER" ]] && lines+="      - TRAEFIK_API_USER=${AGENT_TRAEFIK_USER}\n"
+  [[ -n "$AGENT_TRAEFIK_PASS" ]] && lines+="      - TRAEFIK_API_PASSWORD=${AGENT_TRAEFIK_PASS}\n"
   lines+="      - TMA_RATE_LIMIT=300\n"
   lines+="      - CONFIG_PATH=${AGENT_CONFIG_PATH}\n"
   [[ "$AGENT_INSECURE_TLS" == "true" ]]     && lines+="      - TRAEFIK_INSECURE_SKIP_VERIFY=true\n"
@@ -2498,6 +2511,8 @@ install_agent_binary() {
   local env_lines=""
   env_lines+="Environment=TMA_API_KEY=${AGENT_API_KEY}\n"
   env_lines+="Environment=TRAEFIK_API_URL=${AGENT_TRAEFIK_URL}\n"
+  [[ -n "$AGENT_TRAEFIK_USER" ]] && env_lines+="Environment=TRAEFIK_API_USER=${AGENT_TRAEFIK_USER}\n"
+  [[ -n "$AGENT_TRAEFIK_PASS" ]] && env_lines+="Environment=TRAEFIK_API_PASSWORD=${AGENT_TRAEFIK_PASS}\n"
   env_lines+="Environment=CONFIG_PATH=${AGENT_CONFIG_PATH}\n"
   [[ "$AGENT_INSECURE_TLS" == "true" ]]     && env_lines+="Environment=TRAEFIK_INSECURE_SKIP_VERIFY=true\n"
   [[ -n "$AGENT_STATIC_PATH" ]]             && env_lines+="Environment=STATIC_CONFIG_PATH=${AGENT_STATIC_PATH}\n"
