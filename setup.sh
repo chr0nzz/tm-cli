@@ -17,7 +17,7 @@ EOF
 
 set -euo pipefail
 
-SCRIPT_VERSION="1.8.0"
+SCRIPT_VERSION="1.9.0"
 
 BOLD="\033[1m"
 DIM="\033[2m"
@@ -61,13 +61,13 @@ print_banner() {
   echo "     ██║   ██║  ██║██║  ██║███████╗██║     ██║██║  ██╗"
   echo "     ╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝╚═╝     ╚═╝╚═╝  ╚═╝"
   echo ""
-  echo "                       ◉"
-  echo "                       │"
+  echo "                      ◉"
+  echo "                      │"
   echo "                   ╔═════╗"
-  echo "               ◉ ─── ╠     ╣ ─── ◉"
+  echo "              ◉ ── ╠     ╣ ── ◉"
   echo "                   ╚═════╝"
-  echo "                       │"
-  echo "                       ◉"
+  echo "                      │"
+  echo "                      ◉"
   echo -e "${RESET}"
   echo -e "  ${DIM}+ Traefik Manager - Interactive Setup${RESET}"
   echo ""
