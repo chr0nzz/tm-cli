@@ -1,0 +1,16 @@
+[Unit]
+Description=Traefik Manager Agent
+After=network.target
+
+[Service]
+Type=simple
+EnvironmentFile={{ .EnvFile }}
+{{- range .Env }}
+Environment={{ . }}
+{{- end }}
+ExecStart=/usr/local/bin/tma
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

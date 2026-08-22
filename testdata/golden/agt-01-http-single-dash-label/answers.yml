@@ -1,0 +1,27 @@
+mode: agent-docker-traefik
+dir: /opt/traefik-manager-agent
+deployment: external
+dashboard: true
+hosts:
+  dashboard: traefik.example.com
+  agent: agent.example.com
+tls:
+  method: http
+  email: admin@example.com
+config:
+  layout: single
+network:
+  name: traefik-net
+  traefik_api_port: "8080"
+access:
+  via_traefik: true
+agent:
+  port: "8090"
+mounts:
+  plugins: false
+restart:
+  method: none
+crowdsec:
+  mode: none
+secrets:
+  TMA_API_KEY: tma-api-key-PLACEHOLDER

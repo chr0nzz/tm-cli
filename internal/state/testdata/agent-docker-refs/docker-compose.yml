@@ -1,0 +1,25 @@
+services:
+
+  traefik-manager-agent:
+    image: ghcr.io/chr0nzz/traefik-manager-agent:latest
+    container_name: traefik-manager-agent
+    restart: unless-stopped
+    ports:
+      - "8090:8090"
+    environment:
+      - TMA_API_KEY=${TMA_API_KEY}
+      - TRAEFIK_API_URL=http://traefik:8080
+      - TRAEFIK_API_USER=admin
+      - TRAEFIK_API_PASSWORD=${TRAEFIK_API_PASSWORD}
+      - TMA_RATE_LIMIT=300
+      - CONFIG_PATH=/app/config
+      - CROWDSEC_LAPI_URL=http://crowdsec:8080
+      - CROWDSEC_API_KEY=${CROWDSEC_API_KEY}
+      - GIT_BACKUP_ENABLED=true
+      - GIT_BACKUP_REPO=https://github.com/example/traefik-config.git
+      - GIT_BACKUP_BRANCH=main
+      - GIT_BACKUP_TOKEN=${GIT_BACKUP_TOKEN}
+      - GIT_BACKUP_AUTO_PUSH=true
+    volumes:
+      - /app/config:/app/config
+      - ./backups:/app/backups

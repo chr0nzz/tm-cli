@@ -1,0 +1,19 @@
+services:
+  traefik-manager-agent:
+    image: ghcr.io/chr0nzz/traefik-manager-agent:latest
+    container_name: traefik-manager-agent
+    restart: unless-stopped
+    ports:
+      - "{{ .Port }}:8090"
+    environment:
+{{- range .Env }}
+      - {{ . }}
+{{- end }}
+    volumes:
+{{- range .Volumes }}
+      - {{ . }}
+{{- end }}
+{{- if .CrowdSec }}
+{{- template "crowdsec" .CrowdSec }}
+{{- end }}
+{{- template "named-volumes" .NamedVolumes }}

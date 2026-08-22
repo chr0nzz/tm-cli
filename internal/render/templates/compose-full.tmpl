@@ -1,0 +1,73 @@
+networks:
+  {{ .Network }}:
+    external: {{ .NetworkExternal }}
+    name: {{ .Network }}
+{{- if .SocketProxy }}
+  socket-proxy-net:
+    internal: true
+{{- end }}
+{{- template "named-volumes" .NamedVolumes }}
+
+services:
+  traefik:
+    image: traefik:latest
+    container_name: traefik
+    restart: unless-stopped
+    networks:
+      - {{ .Network }}
+    ports:
+      - "80:80"
+{{- if .TLS }}
+      - "443:443"
+{{- end }}
+      - "{{ .APIPort }}:8080"
+    volumes:
+{{- range .TraefikVolumes }}
+      - {{ . }}
+{{- end }}
+{{- if .DNSEnv }}
+    environment:
+{{- range .DNSEnv }}
+      - {{ . }}
+{{- end }}
+{{- end }}
+{{- if .PoisonPill }}
+    healthcheck:
+      test: ["CMD-SHELL", "[ ! -f /signals/restart.sig ] || (rm /signals/restart.sig && kill -TERM 1)"]
+      interval: 5s
+      timeout: 3s
+      retries: 1
+{{- end }}
+    labels:
+{{- range .TraefikLabels }}
+      - "{{ . }}"
+{{- end }}
+
+  traefik-manager:
+    image: ghcr.io/chr0nzz/traefik-manager:latest
+    container_name: traefik-manager
+    restart: unless-stopped
+    networks:
+{{- range .TMNetworks }}
+      - {{ . }}
+{{- end }}
+    volumes:
+{{- range .TMVolumes }}
+      - {{ . }}
+{{- end }}
+    environment:
+{{- range .TMEnv }}
+      - {{ . }}
+{{- end }}
+    labels:
+{{- range .TMLabels }}
+      - "{{ . }}"
+{{- end }}
+    depends_on:
+      - traefik
+{{- if .SocketProxy }}
+{{- template "socket-proxy" }}
+{{- end }}
+{{- if .CrowdSec }}
+{{- template "crowdsec" .CrowdSec }}
+{{- end }}

@@ -1,0 +1,2 @@
+# Traefik dynamic configuration
+# Traefik Manager writes routers, services and middlewares here.

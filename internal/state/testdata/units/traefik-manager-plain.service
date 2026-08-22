@@ -1,0 +1,24 @@
+[Unit]
+Description=Traefik Manager
+After=network.target
+
+[Service]
+Type=simple
+User=alice
+WorkingDirectory=/home/alice/traefik-manager
+Environment=HOME=/home/alice/traefik-manager
+ExecStart=/home/alice/traefik-manager/venv/bin/gunicorn \
+    --bind 0.0.0.0:5000 \
+    --workers 1 \
+    --log-level info \
+    app:app
+Environment=CONFIG_PATH=/etc/traefik/dynamic.yml
+Environment=BACKUP_DIR=/home/alice/tm-data/backups
+Environment=SETTINGS_PATH=/home/alice/tm-data/manager.yml
+Environment=COOKIE_SECURE=false
+
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,2 @@
+/var/lib/traefik-manager/backups
+/var/lib/traefik-manager/signals

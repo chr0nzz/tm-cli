@@ -1,0 +1,21 @@
+[Unit]
+Description=Traefik Manager Agent
+After=network.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/traefik-manager-agent/env
+Environment="TRAEFIK_API_URL=https://127.0.0.1:8443"
+Environment="CONFIG_PATH=/etc/traefik/dynamic.yml"
+Environment="TRAEFIK_INSECURE_SKIP_VERIFY=true"
+Environment="STATIC_CONFIG_PATH=/etc/traefik/traefik.yml"
+Environment="RESTART_METHOD=poison-pill"
+Environment="TRAEFIK_CONTAINER=traefik"
+Environment="SIGNAL_FILE_PATH=/var/lib/traefik/signals/restart.sig"
+Environment="TMA_PORT=8095"
+ExecStart=/usr/local/bin/tma
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

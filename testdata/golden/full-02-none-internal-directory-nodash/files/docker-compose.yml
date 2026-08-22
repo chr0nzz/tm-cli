@@ -1,0 +1,47 @@
+networks:
+  edge:
+    external: false
+    name: edge
+
+services:
+  traefik:
+    image: traefik:latest
+    container_name: traefik
+    restart: unless-stopped
+    networks:
+      - edge
+    ports:
+      - "80:80"
+      - "9080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik/traefik.yml:/traefik.yml:ro
+      - ./traefik/acme.json:/acme.json
+      - ./traefik/logs:/logs
+      - ./traefik/config:/etc/traefik/config:ro
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.dashboard.rule=Host(`proxy.lan.example`)"
+      - "traefik.http.routers.dashboard.entrypoints=web"
+      - "traefik.http.routers.dashboard.service=api@internal"
+
+  traefik-manager:
+    image: ghcr.io/chr0nzz/traefik-manager:latest
+    container_name: traefik-manager
+    restart: unless-stopped
+    networks:
+      - edge
+    volumes:
+      - ./traefik-manager/config:/app/config
+      - ./traefik-manager/backups:/app/backups
+      - ./traefik/config:/app/config/dynamic
+    environment:
+      - COOKIE_SECURE=false
+      - CONFIG_DIR=/app/config/dynamic
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.traefik-manager.rule=Host(`tm.lan.example`)"
+      - "traefik.http.routers.traefik-manager.entrypoints=web"
+      - "traefik.http.services.traefik-manager.loadbalancer.server.port=5000"
+    depends_on:
+      - traefik

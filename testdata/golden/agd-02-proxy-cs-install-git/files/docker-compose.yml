@@ -1,0 +1,45 @@
+services:
+  traefik-manager-agent:
+    image: ghcr.io/chr0nzz/traefik-manager-agent:latest
+    container_name: traefik-manager-agent
+    restart: unless-stopped
+    ports:
+      - "8090:8090"
+    environment:
+      - TMA_API_KEY=${TMA_API_KEY}
+      - TRAEFIK_API_URL=http://traefik:8080
+      - TMA_RATE_LIMIT=300
+      - CONFIG_PATH=/etc/traefik/dynamic
+      - RESTART_METHOD=proxy
+      - TRAEFIK_CONTAINER=traefik
+      - DOCKER_HOST=tcp://socket-proxy:2375
+      - ACCESS_LOG_PATH=/var/log/traefik/access.log
+      - PLUGINS_DIR=/etc/traefik/plugins
+      - CROWDSEC_LAPI_URL=http://crowdsec:8080
+      - CROWDSEC_API_KEY=${CROWDSEC_API_KEY}
+      - GIT_BACKUP_ENABLED=true
+      - GIT_BACKUP_REPO=https://github.com/example/traefik-config.git
+      - GIT_BACKUP_BRANCH=main
+      - GIT_BACKUP_USERNAME=deploy
+      - GIT_BACKUP_TOKEN=${GIT_BACKUP_TOKEN}
+      - GIT_BACKUP_AUTO_PUSH=false
+    volumes:
+      - /etc/traefik/dynamic:/etc/traefik/dynamic
+      - ./backups:/app/backups
+      - /var/log/traefik/access.log:/var/log/traefik/access.log:ro
+      - /etc/traefik/plugins:/etc/traefik/plugins:ro
+
+  crowdsec:
+    image: crowdsecurity/crowdsec:latest
+    container_name: crowdsec
+    restart: unless-stopped
+    environment:
+      - BOUNCER_KEY_tma=${CROWDSEC_API_KEY}
+      - COLLECTIONS=crowdsecurity/traefik
+    volumes:
+      - crowdsec_data:/var/lib/crowdsec/data
+      - ./crowdsec/acquis.yaml:/etc/crowdsec/acquis.yaml:ro
+      - /var/log/traefik/access.log:/var/log/traefik/access.log:ro
+
+volumes:
+  crowdsec_data:

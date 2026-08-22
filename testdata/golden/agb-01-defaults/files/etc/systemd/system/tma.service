@@ -1,0 +1,16 @@
+[Unit]
+Description=Traefik Manager Agent
+After=network.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/traefik-manager-agent/env
+Environment="TRAEFIK_API_URL=http://localhost:8080"
+Environment="CONFIG_PATH=/etc/traefik/dynamic.yml"
+Environment="TMA_PORT=8090"
+ExecStart=/usr/local/bin/tma
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

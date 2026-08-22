@@ -1,0 +1,22 @@
+mode: tm-docker
+dir: /srv/traefik-manager
+hosts:
+  manager: tm.lan
+tls:
+  method: none
+config:
+  layout: directory
+mounts:
+  access_logs: false
+  certs: true
+  acme_path: /etc/traefik/acme.json
+  static_config: true
+  static_config_path: /etc/traefik/traefik.yml
+restart:
+  method: poison-pill
+  container: traefik
+network:
+  name: traefik-net
+  external: true
+access:
+  via_traefik: true

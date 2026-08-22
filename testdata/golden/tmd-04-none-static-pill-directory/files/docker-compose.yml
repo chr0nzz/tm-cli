@@ -1,0 +1,34 @@
+networks:
+  traefik-net:
+    external: true
+    name: traefik-net
+
+volumes:
+  tm-signals:
+
+services:
+  traefik-manager:
+    image: ghcr.io/chr0nzz/traefik-manager:latest
+    container_name: traefik-manager
+    restart: unless-stopped
+    networks:
+      - traefik-net
+    volumes:
+      - ./config:/app/config
+      - ./backups:/app/backups
+      - /etc/traefik/acme.json:/app/acme.json:ro
+      - /etc/traefik/traefik.yml:/app/traefik.yml
+      - tm-signals:/signals
+      - ./config:/app/config/dynamic
+    environment:
+      - COOKIE_SECURE=false
+      - CONFIG_DIR=/app/config/dynamic
+      - STATIC_CONFIG_PATH=/app/traefik.yml
+      - RESTART_METHOD=poison-pill
+      - TRAEFIK_CONTAINER=traefik
+      - SIGNAL_FILE_PATH=/signals/restart.sig
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.traefik-manager.rule=Host(`tm.lan`)"
+      - "traefik.http.routers.traefik-manager.entrypoints=web"
+      - "traefik.http.services.traefik-manager.loadbalancer.server.port=5000"

@@ -1,0 +1,28 @@
+mode: full
+dir: /srv/traefik-stack
+deployment: external
+domain: example.net
+dashboard: true
+tls:
+  method: dns
+  provider: namecheap
+  email: admin@example.net
+  vars:
+    NAMECHEAP_API_USER: ncuser
+config:
+  layout: directory
+mounts:
+  access_logs: false
+  certs: true
+  static_config: true
+restart:
+  method: poison-pill
+crowdsec:
+  mode: install
+network:
+  name: traefik-net
+  traefik_api_port: "8080"
+secrets:
+  NAMECHEAP_API_KEY: namecheap-api-key-PLACEHOLDER
+  CROWDSEC_API_KEY: crowdsec-api-key-PLACEHOLDER
+  CROWDSEC_MACHINE_PASSWORD: crowdsec-machine-password-PLACEHOLDER

@@ -1,0 +1,40 @@
+services:
+
+  traefik-manager-agent:
+    image: ghcr.io/chr0nzz/traefik-manager-agent:latest
+    container_name: traefik-manager-agent
+    restart: unless-stopped
+    ports:
+      - "8091:8090"
+    environment:
+      - TMA_API_KEY=tma-api-key-PLACEHOLDER
+      - TRAEFIK_API_URL=https://traefik.example.com:8443
+      - TRAEFIK_API_USER=admin
+      - TRAEFIK_API_PASSWORD=traefik-api-password-PLACEHOLDER
+      - TMA_RATE_LIMIT=300
+      - CONFIG_PATH=/etc/traefik/dynamic
+      - TRAEFIK_INSECURE_SKIP_VERIFY=true
+      - STATIC_CONFIG_PATH=/etc/traefik/traefik.yml
+      - RESTART_METHOD=proxy
+      - TRAEFIK_CONTAINER=traefik-main
+      - DOCKER_HOST=tcp://socket-proxy:2375
+      - ACME_JSON_PATH=/etc/traefik/acme.json
+      - ACCESS_LOG_PATH=/var/log/traefik/access.log
+      - PLUGINS_DIR=/etc/traefik/plugins
+      - CROWDSEC_LAPI_URL=http://10.0.0.5:8080
+      - CROWDSEC_API_KEY=crowdsec-api-key-PLACEHOLDER
+      - GIT_BACKUP_ENABLED=true
+      - GIT_BACKUP_REPO=https://github.com/example/traefik-config.git
+      - GIT_BACKUP_BRANCH=backup
+      - GIT_BACKUP_USERNAME=deploy
+      - GIT_BACKUP_TOKEN=git-backup-token-PLACEHOLDER
+      - GIT_BACKUP_AUTO_PUSH=false
+    volumes:
+      - /etc/traefik/dynamic:/etc/traefik/dynamic
+      - ./backups:/app/backups
+      - /etc/traefik/traefik.yml:/etc/traefik/traefik.yml
+      - /etc/traefik/acme.json:/etc/traefik/acme.json:ro
+      - /var/log/traefik/access.log:/var/log/traefik/access.log:ro
+      - /etc/traefik/plugins:/etc/traefik/plugins:ro
+
+

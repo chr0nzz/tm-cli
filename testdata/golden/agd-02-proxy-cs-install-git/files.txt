@@ -1,0 +1,3 @@
+docker-compose.yml 0644
+.env 0600
+crowdsec/acquis.yaml 0644

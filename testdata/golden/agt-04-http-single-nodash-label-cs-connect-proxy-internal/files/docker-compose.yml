@@ -1,0 +1,71 @@
+networks:
+  traefik-net:
+    external: false
+    name: traefik-net
+  socket-proxy-net:
+    internal: true
+
+services:
+  traefik:
+    image: traefik:latest
+    container_name: traefik
+    restart: unless-stopped
+    networks:
+      - traefik-net
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik/traefik.yml:/traefik.yml:ro
+      - ./traefik/logs:/logs
+      - ./traefik/acme.json:/acme.json
+      - ./traefik/config/dynamic.yml:/etc/traefik/config/dynamic.yml:ro
+
+  traefik-manager-agent:
+    image: ghcr.io/chr0nzz/traefik-manager-agent:latest
+    container_name: traefik-manager-agent
+    restart: unless-stopped
+    networks:
+      - traefik-net
+      - socket-proxy-net
+    ports:
+      - "8090:8090"
+    environment:
+      - TMA_API_KEY=${TMA_API_KEY}
+      - TRAEFIK_API_URL=http://traefik:8080
+      - TMA_RATE_LIMIT=300
+      - CONFIG_PATH=/etc/traefik/config
+      - RESTART_METHOD=proxy
+      - TRAEFIK_CONTAINER=traefik
+      - DOCKER_HOST=tcp://socket-proxy:2375
+      - ACME_JSON_PATH=/etc/traefik/acme.json
+      - ACCESS_LOG_PATH=/var/log/traefik/access.log
+      - CROWDSEC_LAPI_URL=http://crowdsec.lan.example:8080
+      - CROWDSEC_API_KEY=${CROWDSEC_API_KEY}
+    volumes:
+      - ./traefik/config/dynamic.yml:/etc/traefik/config/dynamic.yml
+      - ./backups:/app/backups
+      - ./traefik/logs/access.log:/var/log/traefik/access.log:ro
+      - ./traefik/acme.json:/etc/traefik/acme.json:ro
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.tma.rule=Host(`agent.lan.example`)"
+      - "traefik.http.routers.tma.entrypoints=websecure"
+      - "traefik.http.services.tma.loadbalancer.server.port=8090"
+      - "traefik.http.routers.tma.tls.certresolver=letsencrypt"
+    depends_on:
+      - traefik
+
+  socket-proxy:
+    image: tecnativa/docker-socket-proxy
+    container_name: socket-proxy
+    restart: unless-stopped
+    networks:
+      - socket-proxy-net
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      CONTAINERS: 1
+      POST: 1

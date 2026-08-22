@@ -1,0 +1,7 @@
+[Unit]
+Description=Restart Traefik on signal from Traefik Manager
+
+[Service]
+Type=oneshot
+ExecStart=-/bin/rm -f {{ .SignalFileArg }}
+ExecStart=/bin/systemctl restart {{ .ServiceArg }}

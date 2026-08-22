@@ -1,0 +1,23 @@
+mode: tm-native
+tls:
+  method: none
+native:
+  install_dir: /opt/traefik-manager
+  data_dir: /var/lib/traefik-manager
+  port: "5000"
+  service_user: true
+config:
+  layout: directory
+  dir: /etc/traefik/conf.d
+mounts:
+  access_logs: true
+  access_log_path: /var/log/traefik/access.log
+  certs: true
+  acme_path: /etc/traefik/acme.json
+  static_config: true
+  static_config_path: /etc/traefik/traefik.yml
+restart:
+  method: poison-pill
+  traefik_systemd: true
+  traefik_service: traefik
+  signal_file: /var/lib/traefik-manager/signals/restart.sig

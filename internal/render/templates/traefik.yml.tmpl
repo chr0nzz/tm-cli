@@ -1,0 +1,53 @@
+api:
+  dashboard: {{ .Dashboard }}
+  insecure: true
+
+entryPoints:
+  web:
+    address: ":80"
+{{- if .TLS }}
+    http:
+      redirections:
+        entryPoint:
+          to: websecure
+          scheme: https
+  websecure:
+    address: ":443"
+{{- end }}
+
+providers:
+  docker:
+    exposedByDefault: false
+    network: {{ .Network }}
+  file:
+{{- if .SingleFile }}
+    filename: /etc/traefik/config/dynamic.yml
+{{- else }}
+    directory: /etc/traefik/config
+{{- end }}
+    watch: true
+{{- if .TLS }}
+
+certificatesResolvers:
+  {{ .Resolver }}:
+    acme:
+      email: {{ .Email }}
+      storage: /acme.json
+{{- if .DNS }}
+      dnsChallenge:
+        provider: {{ .Provider }}
+        resolvers:
+          - "1.1.1.1:53"
+          - "8.8.8.8:53"
+{{- else }}
+      httpChallenge:
+        entryPoint: web
+{{- end }}
+{{- end }}
+
+log:
+  level: INFO
+
+accessLog:
+  filePath: /logs/access.log
+  bufferingSize: 100

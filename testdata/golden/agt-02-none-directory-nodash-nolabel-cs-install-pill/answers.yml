@@ -1,0 +1,26 @@
+mode: agent-docker-traefik
+dir: /opt/traefik-manager-agent
+deployment: internal
+dashboard: false
+tls:
+  method: none
+config:
+  layout: directory
+network:
+  name: traefik-net
+  traefik_api_port: "8080"
+access:
+  via_traefik: false
+agent:
+  port: "8090"
+mounts:
+  plugins: false
+restart:
+  method: poison-pill
+  container: traefik
+  signal_file: /signals/restart.sig
+crowdsec:
+  mode: install
+secrets:
+  TMA_API_KEY: tma-api-key-PLACEHOLDER
+  CROWDSEC_API_KEY: crowdsec-api-key-PLACEHOLDER

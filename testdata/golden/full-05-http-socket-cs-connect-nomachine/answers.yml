@@ -1,0 +1,24 @@
+mode: full
+dir: /srv/traefik-stack
+deployment: external
+domain: example.com
+dashboard: true
+tls:
+  method: http
+  email: admin@example.com
+config:
+  layout: single
+mounts:
+  access_logs: false
+  certs: false
+  static_config: true
+restart:
+  method: socket
+crowdsec:
+  mode: connect
+  lapi_url: http://crowdsec:8080
+network:
+  name: traefik-net
+  traefik_api_port: "8080"
+secrets:
+  CROWDSEC_API_KEY: crowdsec-api-key-PLACEHOLDER

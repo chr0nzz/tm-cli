@@ -1,0 +1,20 @@
+mode: tm-native
+tls:
+  method: none
+native:
+  install_dir: /srv/tm
+  data_dir: /srv/tm-data
+  port: "5050"
+  service_user: false
+config:
+  layout: single
+  path: /srv/traefik/dynamic.yml
+mounts:
+  access_logs: false
+  certs: false
+  static_config: true
+  static_config_path: /srv/traefik/traefik.yml
+restart:
+  method: poison-pill
+  traefik_systemd: false
+  signal_file: /srv/traefik/signals/restart.sig

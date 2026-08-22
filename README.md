@@ -2,7 +2,7 @@
 
 One-command installer for [Traefik](https://github.com/traefik/traefik) and [Traefik Manager](https://github.com/chr0nzz/traefik-manager).
 
-An interactive script that asks what you want to install and how, then generates all required config files and starts the services.
+`tm` is a CLI that asks what you want to install and how, generates all required config files, starts the services, and manages the install afterwards.
 
 ---
 
@@ -12,7 +12,7 @@ An interactive script that asks what you want to install and how, then generates
 curl -fsSL https://get-traefik.xyzlab.dev | bash
 ```
 
-Or if you prefer to review the script before running:
+Or if you prefer to review the bootstrap before running:
 
 ```bash
 curl -fsSL https://get-traefik.xyzlab.dev -o setup.sh
@@ -20,112 +20,197 @@ chmod +x setup.sh
 ./setup.sh
 ```
 
+The bootstrap is a 120-line POSIX sh script that:
+
+- Checks the OS is Linux and maps the architecture (amd64, arm64, armv7)
+- Downloads `tm-linux-<arch>` and `SHA256SUMS` from the GitHub release
+- Verifies the checksum
+- Installs `tm` to `/usr/local/bin` (sudo if needed, `~/.local/bin` without sudo)
+- Runs `tm install`, passing through any arguments
+
+| Variable | Effect |
+|---|---|
+| `TM_VERSION=1.12.0` | Install that release instead of the latest |
+| `TM_INSTALL_ONLY=1` | Install `tm` and stop, without running `tm install` |
+
+```bash
+curl -fsSL https://get-traefik.xyzlab.dev | TM_VERSION=1.12.0 bash
+curl -fsSL https://get-traefik.xyzlab.dev | bash -s -- --mode agent
+```
+
+---
+
+## Commands
+
+| Command | What it does |
+|---|---|
+| `tm install` | Runs the wizard and installs. On an existing install, offers update or reconfigure |
+| `tm status` | Mode, directory, services, URLs, health |
+| `tm update` | Pulls images, `git pull`, or downloads the agent binary, then restarts |
+| `tm logs [service]` | Follows the logs (`--no-follow`, `-n <lines>`) |
+| `tm restart`, `tm start`, `tm stop` | Whole install, or one service |
+| `tm password` | Prints the temporary password from the logs |
+| `tm reconfigure [--section <id>]` | Re-runs the wizard pre-filled, regenerates tm-owned files, restarts (`--list` shows the sections) |
+| `tm add crowdsec` | Adds CrowdSec to an existing install |
+| `tm doctor` | Checks Docker, ports, DNS, `acme.json`, health endpoints, CrowdSec |
+| `tm uninstall` | Stops the services and removes the files tm wrote, keeping any you changed. `--purge` also removes configs, data and volumes |
+| `tm version` | Prints the version |
+| `tm self-update` | Updates `tm` itself (`--version` picks a release) |
+| `tm completion bash\|zsh\|fish` | Shell completion |
+
+Commands find the install from `--dir` or `TM_DIR`, then the current directory, then the installs `tm` already knows about.
+
 ---
 
 ## Install modes
 
-The script starts by asking what you want to install:
+| Mode | Menu | Installs |
+|---|---|---|
+| `full` | Traefik + Traefik Manager (full stack) | Traefik and Traefik Manager via Docker Compose |
+| `tm-docker` | Traefik Manager only, Docker | Traefik Manager container next to an existing Traefik |
+| `tm-native` | Traefik Manager only, Linux service (systemd) | Traefik Manager as a systemd service, no Docker |
+| `agent-docker` | Traefik Manager Agent, Docker - Agent only | Agent container next to an existing Traefik |
+| `agent-docker-traefik` | Traefik Manager Agent, Docker - Agent + Traefik | Traefik and the agent via Docker Compose |
+| `agent-binary` | Traefik Manager Agent, Binary - Agent only | `tma` binary as a systemd service |
 
-```
-What would you like to install?
-  1) Traefik + Traefik Manager (full stack)
-  2) Traefik Manager only
-  3) Traefik Manager Agent
+`tm install --mode <mode>` skips the menu. `--mode agent` (or `TMA_INSTALL=1`) asks only which agent method. The wizard keeps the same sections and review screen as before and writes nothing until you confirm. Full details per mode: [traefik-manager.xyzlab.dev/traefik-stack](https://traefik-manager.xyzlab.dev/traefik-stack)
+
+---
+
+## Non-interactive
+
+```bash
+tm install --answers answers.yml --yes
 ```
 
-If you choose **Traefik Manager only**, it then asks how to deploy it:
+`answers.yml` for the full stack with Let's Encrypt DNS on Cloudflare and CrowdSec. Keys you leave out take their defaults:
 
+```yaml
+mode: full
+dir: /srv/traefik-stack
+domain: example.com
+tls:
+  method: dns
+  provider: cloudflare
+  email: admin@example.com
+config:
+  layout: directory
+mounts:
+  static_config: true
+restart:
+  method: proxy
+crowdsec:
+  mode: install
 ```
-Deployment method
-  1) Docker
-  2) Linux service (systemd)
+
+`tm install --dump-answers answers.yml` writes the answers of a wizard run to a file (no secrets) to start from. DNS providers: `cloudflare`, `route53`, `digitalocean`, `namecheap`, `duckdns`, `desec`, or `other` with `lego_provider`, `vars` and `secret_vars` for any other lego provider.
+
+Secrets come from environment variables of the same name (`CF_DNS_API_TOKEN=... tm install --answers answers.yml --yes`) or a `secrets:` map in the answers file. A missing required secret is asked for on a terminal; without one the install stops and lists the names.
+
+| Key | Used by |
+|---|---|
+| `TMA_API_KEY`, `TRAEFIK_API_PASSWORD`, `GIT_BACKUP_TOKEN` | Agent: API key, Traefik basic auth password, git backup token |
+| `CROWDSEC_API_KEY`, `CROWDSEC_MACHINE_PASSWORD` | CrowdSec (generated when installed as part of the stack) |
+| `CF_DNS_API_TOKEN`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `DO_AUTH_TOKEN`, `NAMECHEAP_API_KEY`, `DUCKDNS_TOKEN`, `DESEC_TOKEN` | DNS challenge, per provider |
+
+Flags on `tm install`:
+
+| Flag | Effect |
+|---|---|
+| `--mode` | `full`, `tm-docker`, `tm-native`, `agent-docker`, `agent-docker-traefik`, `agent-binary`, `agent` |
+| `--dir` | Install directory (Docker modes) |
+| `--yes` | Assumes yes for confirmations, including installing Docker, and skips the firewall pause |
+| `--api-key` | Agent API key (`TMA_API_KEY`) |
+| `--traefik-url` | Agent: Traefik API URL |
+| `--allow-unverified` | Install the `tma` binary from a release that publishes no `SHA256SUMS` |
+
+```bash
+tm install --mode agent-docker --api-key <key> --traefik-url http://traefik:8080
+```
+
+`--dry-run` renders every file and starts nothing; `--output` picks the directory (default: the install directory):
+
+```bash
+tm install --dry-run --answers answers.yml --output ./out
 ```
 
 ---
 
-## Mode 1 - Traefik + Traefik Manager (full stack)
+## Existing installs
 
-Installs both via Docker Compose. Best for a fresh server with nothing running yet.
+Installs made by the old `setup.sh` are adopted automatically:
 
-The script walks you through:
+| Install | Adopted when |
+|---|---|
+| Docker modes | Any `tm` command run in the install directory, or with `--dir` |
+| Linux service, agent binary | Any `tm` command when no Docker install is found, or `tm install` with the same mode, which then offers update or reconfigure |
 
-- **Deployment type** - external (internet-facing) or internal (LAN / VPN / Tailscale). If external, it shows which ports to open and waits for confirmation.
-- **Domain + subdomains** - hostnames for the Traefik dashboard and Traefik Manager.
-- **TLS / certificates** - Let's Encrypt HTTP challenge, DNS challenge (Cloudflare, Route 53, DigitalOcean, Namecheap, DuckDNS, deSEC), or no TLS.
-- **Dynamic config layout** - single `dynamic.yml` file or a directory where each service gets its own `.yml`.
-- **Optional mounts** - access logs, `acme.json`, and `traefik.yml` for the Logs, Certs, and Plugins tabs in Traefik Manager.
-- **Static config editor** - if you enable the `traefik.yml` mount, the script also asks which restart method to use (socket proxy, poison pill, or direct socket) and adds all required compose additions automatically.
-- **CrowdSec** - optionally add CrowdSec intrusion detection. Choose to install it as part of the stack (generates a bouncer key, adds the service, writes `acquis.yaml`) or connect to an existing instance (prompts for LAPI URL and API key). Credentials are injected into Traefik Manager automatically so the CrowdSec tab works out of the box.
-- **Docker** - if Docker is not installed, the script offers to install it for you.
+Secrets stay in the compose file or unit until the first `tm reconfigure`, which moves them to `.env` (or `/etc/traefik-manager-agent/env` for the binary agent).
 
-### What gets created
+---
+
+## What gets created
+
+`.env` holds the secrets (mode 600) and is only written when there are any. `.tm/state.yml` is tm's record of the install, without secrets. Configs, backups, `acme.json`, `traefik.yml` and logs are not tm-owned: `reconfigure` leaves them alone and `uninstall` keeps them unless you `--purge`. A file you edited by hand is never overwritten or removed without being offered first.
 
 ```
-~/traefik-stack/
+~/traefik-stack/                          full
 - docker-compose.yml
+- .env
+- .tm/state.yml
 - traefik/
   - traefik.yml
   - acme.json
-  - logs/
-    - access.log
+  - logs/access.log
   - config/
-    - dynamic.yml        (single file mode)
-    - *.yml              (directory mode)
+    - dynamic.yml                         (single file layout)
+    - *.yml                               (directory layout)
 - traefik-manager/
   - config/
   - backups/
-- crowdsec/              (only if CrowdSec install mode chosen)
-  - acquis.yaml
+- crowdsec/acquis.yaml                    (CrowdSec install only)
+
+~/traefik-manager/                        tm-docker
+- docker-compose.yml
+- .env
+- .tm/state.yml
+- config/dynamic.yml                      (or config directory)
+- backups/
+
+/opt/traefik-manager-agent/               agent-docker
+- docker-compose.yml
+- .env
+- .tm/state.yml
+- backups/
+- crowdsec/acquis.yaml                    (CrowdSec install only)
+
+/opt/traefik-manager-agent/               agent-docker-traefik
+- docker-compose.yml
+- .env
+- .tm/state.yml
+- backups/
+- traefik/
+  - traefik.yml
+  - acme.json                             (TLS enabled)
+  - logs/access.log
+  - config/dynamic.yml
+- crowdsec/acquis.yaml                    (CrowdSec install only)
 ```
 
----
-
-## Mode 2 - Traefik Manager only (Docker)
-
-Installs just Traefik Manager as a Docker container. Use this when Traefik is already running.
-
-The script asks:
-
-- Whether to connect to an existing Traefik Docker network
-- Whether to expose via Traefik labels (with domain + TLS) or a direct host port
-- Dynamic config layout and optional mounts - you provide paths to your existing Traefik files
+The Linux service keeps its record in `/etc/traefik-manager/tm-state.yml`, the binary agent in `/etc/traefik-manager-agent/tm-state.yml`.
 
 ---
 
-## Mode 3 - Traefik Manager only (Linux service)
+## Requirements
 
-Installs Traefik Manager as a native systemd service. No Docker required.
+| Mode | Needs |
+|---|---|
+| All | Linux, amd64, arm64 or armv7 |
+| Docker modes | Docker and Compose. `tm` offers to install them with Docker's official script, and uses `pacman` on Arch, which that script does not support |
+| Linux service | Python 3.11+, `git`, `systemd` |
+| Agent binary | `systemd` |
 
-Requirements: Python 3.11+, `git`, `systemd`.
-
-The script handles cloning the repo, creating a Python venv, installing dependencies, writing the systemd unit file, and enabling the service.
-
----
-
-## Mode 4 - Traefik Manager Agent
-
-Installs the TMA agent on a remote server so a central Traefik Manager can manage it remotely.
-
-Three sub-options:
-- **Docker - Agent only** - deploy TMA alongside an existing Traefik on this server
-- **Docker - Agent + Traefik** - deploy both Traefik and TMA together on a fresh server
-- **Binary - Agent only** - download the `tma` binary and install it as a systemd service
-
-The script asks for the API key (generated in TM Settings - Agents), Traefik API URL, config paths, optional restart method, CrowdSec, and git backup configuration. It generates a ready-to-run `docker-compose.yml` or systemd unit with all options pre-filled.
-
-To skip the menu and go straight to agent mode:
-```bash
-export TMA_INSTALL=1
-curl -fsSL https://get-traefik.xyzlab.dev | bash
-```
-
-Full docs: [traefik-manager.xyzlab.dev/agent](https://traefik-manager.xyzlab.dev/agent)
-
----
-
-## Notes
-
-**Docker group:** if the script installs Docker, it exits after installation with a prompt to re-run. The new `docker` group requires a fresh shell to take effect - just run the curl command again.
+**Docker group:** a shell that was open before Docker was installed is not in the `docker` group yet, so `tm` runs docker through `sudo` for the rest of the run and says so. Log out and back in to stop needing it. Every other command detects the same situation on its own.
 
 ---
 

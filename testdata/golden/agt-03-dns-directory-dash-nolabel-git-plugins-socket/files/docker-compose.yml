@@ -1,0 +1,64 @@
+networks:
+  proxy-net:
+    external: false
+    name: proxy-net
+
+services:
+  traefik:
+    image: traefik:latest
+    container_name: traefik
+    restart: unless-stopped
+    networks:
+      - proxy-net
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8081:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik/traefik.yml:/traefik.yml:ro
+      - ./traefik/logs:/logs
+      - ./traefik/acme.json:/acme.json
+      - ./traefik/config:/etc/traefik/config:ro
+    environment:
+      - CF_DNS_API_TOKEN=${CF_DNS_API_TOKEN}
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.dashboard.rule=Host(`traefik.example.org`)"
+      - "traefik.http.routers.dashboard.entrypoints=websecure"
+      - "traefik.http.routers.dashboard.service=api@internal"
+      - "traefik.http.routers.dashboard.tls.certresolver=letsencrypt"
+
+  traefik-manager-agent:
+    image: ghcr.io/chr0nzz/traefik-manager-agent:latest
+    container_name: traefik-manager-agent
+    restart: unless-stopped
+    networks:
+      - proxy-net
+    ports:
+      - "8091:8090"
+    environment:
+      - TMA_API_KEY=${TMA_API_KEY}
+      - TRAEFIK_API_URL=http://traefik:8080
+      - TMA_RATE_LIMIT=300
+      - CONFIG_PATH=/etc/traefik/config
+      - RESTART_METHOD=socket
+      - TRAEFIK_CONTAINER=traefik
+      - ACME_JSON_PATH=/etc/traefik/acme.json
+      - ACCESS_LOG_PATH=/var/log/traefik/access.log
+      - PLUGINS_DIR=/etc/traefik/plugins
+      - GIT_BACKUP_ENABLED=true
+      - GIT_BACKUP_REPO=https://github.com/example/edge-config.git
+      - GIT_BACKUP_BRANCH=prod
+      - GIT_BACKUP_USERNAME=bot
+      - GIT_BACKUP_TOKEN=${GIT_BACKUP_TOKEN}
+      - GIT_BACKUP_AUTO_PUSH=true
+    volumes:
+      - ./traefik/config:/etc/traefik/config
+      - ./backups:/app/backups
+      - ./traefik/logs/access.log:/var/log/traefik/access.log:ro
+      - ./traefik/acme.json:/etc/traefik/acme.json:ro
+      - /etc/traefik/plugins:/etc/traefik/plugins:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      - traefik

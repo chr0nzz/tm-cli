@@ -1,0 +1,56 @@
+networks:
+  traefik-net:
+    external: false
+    name: traefik-net
+
+services:
+  traefik:
+    image: traefik:latest
+    container_name: traefik
+    restart: unless-stopped
+    networks:
+      - traefik-net
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik/traefik.yml:/traefik.yml:ro
+      - ./traefik/acme.json:/acme.json
+      - ./traefik/logs:/logs
+      - ./traefik/config:/etc/traefik/config:ro
+    environment:
+      - HETZNER_API_KEY=${HETZNER_API_KEY}
+      - HETZNER_PROPAGATION_TIMEOUT=120
+      - HETZNER_TTL=60
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.dashboard.rule=Host(`traefik.home.example`)"
+      - "traefik.http.routers.dashboard.entrypoints=websecure"
+      - "traefik.http.routers.dashboard.service=api@internal"
+      - "traefik.http.routers.dashboard.tls.certresolver=letsencrypt"
+
+  traefik-manager:
+    image: ghcr.io/chr0nzz/traefik-manager:latest
+    container_name: traefik-manager
+    restart: unless-stopped
+    networks:
+      - traefik-net
+    volumes:
+      - ./traefik-manager/config:/app/config
+      - ./traefik-manager/backups:/app/backups
+      - ./traefik/logs:/app/logs:ro
+      - ./traefik/acme.json:/app/acme.json:ro
+      - ./traefik/config:/app/config/dynamic
+    environment:
+      - COOKIE_SECURE=true
+      - CONFIG_DIR=/app/config/dynamic
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.traefik-manager.rule=Host(`manager.home.example`)"
+      - "traefik.http.routers.traefik-manager.entrypoints=websecure"
+      - "traefik.http.services.traefik-manager.loadbalancer.server.port=5000"
+      - "traefik.http.routers.traefik-manager.tls.certresolver=letsencrypt"
+    depends_on:
+      - traefik

@@ -1,0 +1,45 @@
+{{ define "socket-proxy" }}
+
+  socket-proxy:
+    image: tecnativa/docker-socket-proxy
+    container_name: socket-proxy
+    restart: unless-stopped
+    networks:
+      - socket-proxy-net
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      CONTAINERS: 1
+      POST: 1
+{{- end }}
+
+{{ define "crowdsec" }}
+
+  crowdsec:
+    image: crowdsecurity/crowdsec:latest
+    container_name: crowdsec
+    restart: unless-stopped
+{{- if .Network }}
+    networks:
+      - {{ .Network }}
+{{- end }}
+    environment:
+      - {{ .BouncerVar }}=${CROWDSEC_API_KEY}
+      - COLLECTIONS=crowdsecurity/traefik
+    volumes:
+      - crowdsec_data:/var/lib/crowdsec/data
+      - ./crowdsec/acquis.yaml:/etc/crowdsec/acquis.yaml:ro
+{{- if .LogVolume }}
+      - {{ .LogVolume }}
+{{- end }}
+{{- end }}
+
+{{ define "named-volumes" }}
+{{- if . }}
+
+volumes:
+{{- range . }}
+  {{ . }}:
+{{- end }}
+{{- end }}
+{{- end }}

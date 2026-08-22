@@ -1,0 +1,1 @@
+/etc/systemd/system/traefik-manager.service 0644 privileged

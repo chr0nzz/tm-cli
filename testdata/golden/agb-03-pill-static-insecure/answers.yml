@@ -1,0 +1,22 @@
+mode: agent-binary
+tls:
+  method: none
+agent:
+  traefik_url: https://127.0.0.1:8443
+  insecure_tls: true
+  config_path: /etc/traefik/dynamic.yml
+  port: "8095"
+mounts:
+  access_logs: false
+  certs: false
+  static_config: true
+  static_config_path: /etc/traefik/traefik.yml
+  plugins: false
+restart:
+  method: poison-pill
+  container: traefik
+  signal_file: /var/lib/traefik/signals/restart.sig
+crowdsec:
+  mode: none
+secrets:
+  TMA_API_KEY: tma-api-key-PLACEHOLDER

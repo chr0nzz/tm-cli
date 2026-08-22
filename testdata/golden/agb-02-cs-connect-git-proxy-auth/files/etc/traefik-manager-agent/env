@@ -1,0 +1,4 @@
+CROWDSEC_API_KEY='crowdsec-api-key-PLACEHOLDER'
+TMA_API_KEY='tma-api-key-PLACEHOLDER'
+TRAEFIK_API_PASSWORD='traefik-api-password-PLACEHOLDER'
+GIT_BACKUP_TOKEN='git-backup-token-PLACEHOLDER'

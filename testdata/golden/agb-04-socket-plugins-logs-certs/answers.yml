@@ -1,0 +1,22 @@
+mode: agent-binary
+tls:
+  method: none
+agent:
+  traefik_url: http://localhost:8080
+  config_path: /etc/traefik/dynamic.yml
+  port: "8090"
+mounts:
+  access_logs: true
+  access_log_path: /var/log/traefik/access.log
+  certs: true
+  acme_path: /etc/traefik/acme.json
+  static_config: false
+  plugins: true
+  plugins_dir: /etc/traefik/plugins
+restart:
+  method: socket
+  container: traefik
+crowdsec:
+  mode: none
+secrets:
+  TMA_API_KEY: tma-api-key-PLACEHOLDER

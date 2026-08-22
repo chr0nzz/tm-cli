@@ -1,0 +1,93 @@
+networks:
+  traefik-net:
+    external: false
+    name: traefik-net
+
+
+volumes:
+  tm-signals:
+  crowdsec_data:
+services:
+
+  traefik:
+    image: traefik:latest
+    container_name: traefik
+    restart: unless-stopped
+    networks:
+      - traefik-net
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik/traefik.yml:/traefik.yml:ro
+      - ./traefik/acme.json:/acme.json
+      - ./traefik/logs:/logs
+      - ./traefik/config:/etc/traefik/config:ro
+      - tm-signals:/signals
+    environment:
+      - CF_DNS_API_TOKEN=cf-dns-api-token-PLACEHOLDER
+    healthcheck:
+      test: ["CMD-SHELL", "[ ! -f /signals/restart.sig ] || (rm /signals/restart.sig && kill -TERM 1)"]
+      interval: 5s
+      timeout: 3s
+      retries: 1
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.dashboard.rule=Host(`traefik.example.com`)"
+      - "traefik.http.routers.dashboard.entrypoints=websecure"
+      - "traefik.http.routers.dashboard.service=api@internal"
+      - "traefik.http.routers.dashboard.tls.certresolver=letsencrypt"
+      - "traefik-manager.role=traefik"
+      - "traefik-manager.static-config=/app/traefik.yml"
+      - "traefik-manager.restart-method=poison-pill"
+
+  traefik-manager:
+    image: ghcr.io/chr0nzz/traefik-manager:latest
+    container_name: traefik-manager
+    restart: unless-stopped
+    networks:
+      - traefik-net
+    volumes:
+      - ./traefik-manager/config:/app/config
+      - ./traefik-manager/backups:/app/backups
+      - ./traefik/logs:/app/logs:ro
+      - ./traefik/acme.json:/app/acme.json:ro
+      - ./traefik/traefik.yml:/app/traefik.yml
+      - tm-signals:/signals
+      - ./traefik/config:/app/config/dynamic
+    environment:
+      - COOKIE_SECURE=true
+      - CONFIG_DIR=/app/config/dynamic
+      - STATIC_CONFIG_PATH=/app/traefik.yml
+      - RESTART_METHOD=poison-pill
+      - TRAEFIK_CONTAINER=traefik
+      - SIGNAL_FILE_PATH=/signals/restart.sig
+      - CROWDSEC_LAPI_URL=http://crowdsec:8080
+      - CROWDSEC_API_KEY=crowdsec-api-key-PLACEHOLDER
+      - CROWDSEC_MACHINE_ID=traefik-manager
+      - CROWDSEC_MACHINE_PASSWORD=crowdsec-machine-password-PLACEHOLDER
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.traefik-manager.rule=Host(`manager.example.com`)"
+      - "traefik.http.routers.traefik-manager.entrypoints=websecure"
+      - "traefik.http.services.traefik-manager.loadbalancer.server.port=5000"
+      - "traefik.http.routers.traefik-manager.tls.certresolver=letsencrypt"
+    depends_on:
+      - traefik
+
+
+  crowdsec:
+    image: crowdsecurity/crowdsec:latest
+    container_name: crowdsec
+    restart: unless-stopped
+    networks:
+      - traefik-net
+    environment:
+      - BOUNCER_KEY_traefik-manager=crowdsec-api-key-PLACEHOLDER
+      - COLLECTIONS=crowdsecurity/traefik
+    volumes:
+      - crowdsec_data:/var/lib/crowdsec/data
+      - ./crowdsec/acquis.yaml:/etc/crowdsec/acquis.yaml:ro
+      - ./traefik/logs/access.log:/var/log/traefik/access.log:ro

@@ -1,0 +1,31 @@
+mode: agent-docker
+dir: /opt/traefik-manager-agent
+tls:
+  method: none
+agent:
+  traefik_url: http://traefik:8080
+  config_path: /etc/traefik/dynamic
+  port: "8090"
+  git:
+    enabled: true
+    repo: https://github.com/example/traefik-config.git
+    branch: main
+    user: deploy
+    auto_push: false
+mounts:
+  access_logs: true
+  access_log_path: /var/log/traefik/access.log
+  certs: false
+  static_config: false
+  plugins: true
+  plugins_dir: /etc/traefik/plugins
+restart:
+  method: proxy
+  container: traefik
+  docker_host: tcp://socket-proxy:2375
+crowdsec:
+  mode: install
+secrets:
+  TMA_API_KEY: tma-api-key-PLACEHOLDER
+  CROWDSEC_API_KEY: crowdsec-api-key-PLACEHOLDER
+  GIT_BACKUP_TOKEN: git-backup-token-PLACEHOLDER
