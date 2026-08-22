@@ -1,0 +1,23 @@
+mode: full
+dir: /srv/traefik-stack
+deployment: internal
+domain: lan.example
+hosts:
+  dashboard: proxy.lan.example
+  manager: tm.lan.example
+dashboard: false
+tls:
+  method: none
+config:
+  layout: directory
+mounts:
+  access_logs: false
+  certs: false
+  static_config: false
+restart:
+  method: none
+crowdsec:
+  mode: none
+network:
+  name: edge
+  traefik_api_port: "9080"

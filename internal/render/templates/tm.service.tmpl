@@ -1,0 +1,27 @@
+[Unit]
+Description=Traefik Manager
+After=network.target
+
+[Service]
+Type=simple
+User={{ .User }}
+WorkingDirectory={{ .InstallDir }}
+Environment={{ .HomeEnv }}
+ExecStart={{ .ExecStartArg }} \
+    --bind 0.0.0.0:{{ .Port }} \
+    --workers 1 \
+    --log-level info \
+    app:app
+Environment={{ .ConfigEnv }}
+Environment={{ .BackupEnv }}
+Environment={{ .SettingsEnv }}
+Environment="COOKIE_SECURE=false"
+{{- range .OptionalEnv }}
+Environment={{ . }}
+{{- end }}
+
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

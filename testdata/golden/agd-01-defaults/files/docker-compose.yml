@@ -1,0 +1,15 @@
+services:
+  traefik-manager-agent:
+    image: ghcr.io/chr0nzz/traefik-manager-agent:latest
+    container_name: traefik-manager-agent
+    restart: unless-stopped
+    ports:
+      - "8090:8090"
+    environment:
+      - TMA_API_KEY=${TMA_API_KEY}
+      - TRAEFIK_API_URL=http://traefik:8080
+      - TMA_RATE_LIMIT=300
+      - CONFIG_PATH=/app/config
+    volumes:
+      - /app/config:/app/config
+      - ./backups:/app/backups

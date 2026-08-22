@@ -1,0 +1,4 @@
+traefik/config
+traefik/logs
+backups
+crowdsec

@@ -1,0 +1,3 @@
+traefik/config
+traefik/logs
+backups

@@ -1,0 +1,22 @@
+api:
+  dashboard: false
+  insecure: true
+
+entryPoints:
+  web:
+    address: ":80"
+
+providers:
+  docker:
+    exposedByDefault: false
+    network: traefik-net
+  file:
+    directory: /etc/traefik/config
+    watch: true
+
+log:
+  level: INFO
+
+accessLog:
+  filePath: /logs/access.log
+  bufferingSize: 100

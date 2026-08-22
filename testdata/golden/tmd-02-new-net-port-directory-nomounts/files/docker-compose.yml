@@ -1,0 +1,21 @@
+networks:
+  traefik-manager-net:
+    external: false
+    name: traefik-manager-net
+
+services:
+  traefik-manager:
+    image: ghcr.io/chr0nzz/traefik-manager:latest
+    container_name: traefik-manager
+    restart: unless-stopped
+    networks:
+      - traefik-manager-net
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./config:/app/config
+      - ./backups:/app/backups
+      - ./config:/app/config/dynamic
+    environment:
+      - COOKIE_SECURE=false
+      - CONFIG_DIR=/app/config/dynamic

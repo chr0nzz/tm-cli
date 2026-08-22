@@ -1,0 +1,26 @@
+networks:
+  proxy:
+    external: true
+    name: proxy
+
+services:
+  traefik-manager:
+    image: ghcr.io/chr0nzz/traefik-manager:latest
+    container_name: traefik-manager
+    restart: unless-stopped
+    networks:
+      - proxy
+    ports:
+      - "8081:5000"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./config:/app/config
+      - ./backups:/app/backups
+      - /var/log/traefik/access.log:/app/logs/access.log:ro
+      - /etc/traefik/traefik.yml:/app/traefik.yml
+      - ./config/dynamic.yml:/app/config/dynamic.yml
+    environment:
+      - COOKIE_SECURE=false
+      - STATIC_CONFIG_PATH=/app/traefik.yml
+      - RESTART_METHOD=socket
+      - TRAEFIK_CONTAINER=traefik-prod

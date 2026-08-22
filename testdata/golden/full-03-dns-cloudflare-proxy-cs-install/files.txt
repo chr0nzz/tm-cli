@@ -1,0 +1,7 @@
+docker-compose.yml 0644
+.env 0600
+traefik/traefik.yml 0644
+traefik/config/dynamic.yml 0644 create-only
+traefik/acme.json 0600 create-only
+traefik/logs/access.log 0644 create-only
+crowdsec/acquis.yaml 0644

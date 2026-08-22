@@ -1,0 +1,85 @@
+networks:
+  edge:
+    external: false
+    name: edge
+
+services:
+
+  traefik:
+    image: traefik:latest
+    container_name: traefik
+    restart: unless-stopped
+    networks:
+      - edge
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik/traefik.yml:/traefik.yml:ro
+      - ./traefik/logs:/logs
+      - ./traefik/acme.json:/acme.json
+      - ./traefik/config:/etc/traefik/config:ro
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.dashboard.rule=Host(`traefik.example.com`)"
+      - "traefik.http.routers.dashboard.entrypoints=websecure"
+      - "traefik.http.routers.dashboard.service=api@internal"
+      - "traefik.http.routers.dashboard.tls.certresolver=letsencrypt"
+
+  traefik-manager-agent:
+    image: ghcr.io/chr0nzz/traefik-manager-agent:latest
+    container_name: traefik-manager-agent
+    restart: unless-stopped
+    networks:
+      - edge
+    ports:
+      - "8090:8090"
+    environment:
+      - TMA_API_KEY=tma-api-key-PLACEHOLDER
+      - TRAEFIK_API_URL=http://traefik:8081
+      - TMA_RATE_LIMIT=300
+      - CONFIG_PATH=/etc/traefik/config
+      - RESTART_METHOD=poison-pill
+      - SIGNAL_FILE_PATH=/signals/restart.sig
+      - ACME_JSON_PATH=/etc/traefik/acme.json
+      - ACCESS_LOG_PATH=/var/log/traefik/access.log
+      - PLUGINS_DIR=/etc/traefik/plugins
+      - CROWDSEC_LAPI_URL=http://crowdsec:8080
+      - CROWDSEC_API_KEY=crowdsec-api-key-PLACEHOLDER
+    volumes:
+      - ./traefik/config:/etc/traefik/config
+      - ./backups:/app/backups
+      - ./traefik/logs/access.log:/var/log/traefik/access.log:ro
+      - ./traefik/acme.json:/etc/traefik/acme.json:ro
+      - /etc/traefik/plugins:/etc/traefik/plugins:ro
+      - traefik-signals:/signals
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.tma.rule=Host(`agent.example.com`)"
+      - "traefik.http.routers.tma.entrypoints=websecure"
+      - "traefik.http.services.tma.loadbalancer.server.port=8090"
+      - "traefik.http.routers.tma.tls.certresolver=letsencrypt"
+
+    depends_on:
+      - traefik
+
+  crowdsec:
+    image: crowdsecurity/crowdsec:latest
+    container_name: crowdsec
+    restart: unless-stopped
+    networks:
+      - edge
+    environment:
+      - BOUNCER_KEY_tma=crowdsec-api-key-PLACEHOLDER
+      - COLLECTIONS=crowdsecurity/traefik
+    volumes:
+      - crowdsec_data:/var/lib/crowdsec/data
+      - ./crowdsec/acquis.yaml:/etc/crowdsec/acquis.yaml:ro
+      - ./traefik/logs/access.log:/var/log/traefik/access.log:ro
+
+
+volumes:
+  traefik-signals:
+  crowdsec_data:
+

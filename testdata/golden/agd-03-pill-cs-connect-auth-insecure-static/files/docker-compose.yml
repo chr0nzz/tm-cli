@@ -1,0 +1,31 @@
+services:
+  traefik-manager-agent:
+    image: ghcr.io/chr0nzz/traefik-manager-agent:latest
+    container_name: traefik-manager-agent
+    restart: unless-stopped
+    ports:
+      - "8090:8090"
+    environment:
+      - TMA_API_KEY=${TMA_API_KEY}
+      - TRAEFIK_API_URL=https://traefik.internal:8443
+      - TRAEFIK_API_USER=admin
+      - TRAEFIK_API_PASSWORD=${TRAEFIK_API_PASSWORD}
+      - TMA_RATE_LIMIT=300
+      - CONFIG_PATH=/app/config
+      - TRAEFIK_INSECURE_SKIP_VERIFY=true
+      - STATIC_CONFIG_PATH=/etc/traefik/traefik.yml
+      - RESTART_METHOD=poison-pill
+      - TRAEFIK_CONTAINER=traefik
+      - SIGNAL_FILE_PATH=/signals/restart.sig
+      - ACME_JSON_PATH=/etc/traefik/acme.json
+      - CROWDSEC_LAPI_URL=http://10.0.0.9:8080
+      - CROWDSEC_API_KEY=${CROWDSEC_API_KEY}
+    volumes:
+      - /app/config:/app/config
+      - ./backups:/app/backups
+      - /etc/traefik/traefik.yml:/etc/traefik/traefik.yml
+      - /etc/traefik/acme.json:/etc/traefik/acme.json:ro
+      - traefik-signals:/signals
+
+volumes:
+  traefik-signals:

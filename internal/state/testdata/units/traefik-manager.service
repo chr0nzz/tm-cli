@@ -1,0 +1,29 @@
+[Unit]
+Description=Traefik Manager
+After=network.target
+
+[Service]
+Type=simple
+User=traefik-manager
+WorkingDirectory=/opt/traefik-manager
+Environment=HOME=/opt/traefik-manager
+ExecStart=/opt/traefik-manager/venv/bin/gunicorn \
+    --bind 0.0.0.0:5001 \
+    --workers 1 \
+    --log-level info \
+    app:app
+Environment=CONFIG_DIR=/etc/traefik/conf.d
+Environment=BACKUP_DIR=/var/lib/traefik-manager/backups
+Environment=SETTINGS_PATH=/var/lib/traefik-manager/manager.yml
+Environment=COOKIE_SECURE=false
+Environment=ACME_JSON_PATH=/etc/traefik/acme.json
+Environment=ACCESS_LOG_PATH=/var/log/traefik/access.log
+Environment=STATIC_CONFIG_PATH=/etc/traefik/traefik.yml
+Environment=RESTART_METHOD=poison-pill
+Environment=SIGNAL_FILE_PATH=/var/lib/traefik-manager/signals/restart.sig
+
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

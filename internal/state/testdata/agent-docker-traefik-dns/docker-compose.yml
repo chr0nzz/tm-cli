@@ -1,0 +1,55 @@
+networks:
+  traefik-net:
+    external: false
+    name: traefik-net
+
+services:
+
+  traefik:
+    image: traefik:latest
+    container_name: traefik
+    restart: unless-stopped
+    networks:
+      - traefik-net
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik/traefik.yml:/traefik.yml:ro
+      - ./traefik/logs:/logs
+      - ./traefik/acme.json:/acme.json
+      - ./traefik/config/dynamic.yml:/etc/traefik/config/dynamic.yml:ro
+    environment:
+      - AWS_ACCESS_KEY_ID=aws-access-key-id-PLACEHOLDER
+      - AWS_SECRET_ACCESS_KEY=aws-secret-access-key-PLACEHOLDER
+      - AWS_REGION=eu-west-1
+
+  traefik-manager-agent:
+    image: ghcr.io/chr0nzz/traefik-manager-agent:latest
+    container_name: traefik-manager-agent
+    restart: unless-stopped
+    networks:
+      - traefik-net
+    ports:
+      - "8090:8090"
+    environment:
+      - TMA_API_KEY=tma-api-key-PLACEHOLDER
+      - TRAEFIK_API_URL=http://traefik:8080
+      - TMA_RATE_LIMIT=300
+      - CONFIG_PATH=/etc/traefik/config
+      - RESTART_METHOD=socket
+      - TRAEFIK_CONTAINER=traefik
+      - ACME_JSON_PATH=/etc/traefik/acme.json
+      - ACCESS_LOG_PATH=/var/log/traefik/access.log
+    volumes:
+      - ./traefik/config/dynamic.yml:/etc/traefik/config/dynamic.yml
+      - ./backups:/app/backups
+      - ./traefik/logs/access.log:/var/log/traefik/access.log:ro
+      - ./traefik/acme.json:/etc/traefik/acme.json:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+    depends_on:
+      - traefik
+
+

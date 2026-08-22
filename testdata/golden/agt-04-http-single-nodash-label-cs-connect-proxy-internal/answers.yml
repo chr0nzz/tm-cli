@@ -1,0 +1,30 @@
+mode: agent-docker-traefik
+dir: /opt/traefik-manager-agent
+deployment: internal
+dashboard: false
+hosts:
+  agent: agent.lan.example
+tls:
+  method: http
+  email: admin@lan.example
+config:
+  layout: single
+network:
+  name: traefik-net
+  traefik_api_port: "8080"
+access:
+  via_traefik: true
+agent:
+  port: "8090"
+mounts:
+  plugins: false
+restart:
+  method: proxy
+  container: traefik
+  docker_host: tcp://socket-proxy:2375
+crowdsec:
+  mode: connect
+  lapi_url: http://crowdsec.lan.example:8080
+secrets:
+  TMA_API_KEY: tma-api-key-PLACEHOLDER
+  CROWDSEC_API_KEY: crowdsec-api-key-PLACEHOLDER

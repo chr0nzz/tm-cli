@@ -1,0 +1,6 @@
+[Unit]
+Description=Restart Traefik on signal from Traefik Manager
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'rm -f /var/lib/traefik-manager/signals/restart.sig && systemctl restart traefik-custom'

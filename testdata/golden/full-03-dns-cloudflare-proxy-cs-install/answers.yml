@@ -1,0 +1,26 @@
+mode: full
+dir: /srv/traefik-stack
+deployment: external
+domain: example.com
+dashboard: true
+tls:
+  method: dns
+  provider: cloudflare
+  email: admin@example.com
+config:
+  layout: single
+mounts:
+  access_logs: true
+  certs: true
+  static_config: true
+restart:
+  method: proxy
+crowdsec:
+  mode: install
+network:
+  name: traefik-net
+  traefik_api_port: "8080"
+secrets:
+  CF_DNS_API_TOKEN: cf-dns-api-token-PLACEHOLDER
+  CROWDSEC_API_KEY: crowdsec-api-key-PLACEHOLDER
+  CROWDSEC_MACHINE_PASSWORD: crowdsec-machine-password-PLACEHOLDER

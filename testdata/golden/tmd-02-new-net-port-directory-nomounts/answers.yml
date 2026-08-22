@@ -1,0 +1,16 @@
+mode: tm-docker
+dir: /srv/traefik-manager
+config:
+  layout: directory
+mounts:
+  access_logs: false
+  certs: false
+  static_config: false
+restart:
+  method: none
+network:
+  name: traefik-manager-net
+  external: false
+access:
+  via_traefik: false
+  port: "5000"

@@ -1,0 +1,37 @@
+mode: agent-docker-traefik
+dir: /opt/traefik-manager-agent
+deployment: external
+dashboard: true
+hosts:
+  dashboard: traefik.example.org
+tls:
+  method: dns
+  provider: cloudflare
+  email: ops@example.org
+config:
+  layout: directory
+network:
+  name: proxy-net
+  traefik_api_port: "8081"
+access:
+  via_traefik: false
+agent:
+  port: "8091"
+  git:
+    enabled: true
+    repo: https://github.com/example/edge-config.git
+    branch: prod
+    user: bot
+    auto_push: true
+mounts:
+  plugins: true
+  plugins_dir: /etc/traefik/plugins
+restart:
+  method: socket
+  container: traefik
+crowdsec:
+  mode: none
+secrets:
+  TMA_API_KEY: tma-api-key-PLACEHOLDER
+  CF_DNS_API_TOKEN: cf-dns-api-token-PLACEHOLDER
+  GIT_BACKUP_TOKEN: git-backup-token-PLACEHOLDER

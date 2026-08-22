@@ -1,0 +1,22 @@
+services:
+  traefik-manager-agent:
+    image: ghcr.io/chr0nzz/traefik-manager-agent:latest
+    container_name: traefik-manager-agent
+    restart: unless-stopped
+    ports:
+      - "9090:8090"
+    environment:
+      - TMA_API_KEY=${TMA_API_KEY}
+      - TRAEFIK_API_URL=http://traefik-edge:8080
+      - TMA_RATE_LIMIT=300
+      - CONFIG_PATH=/app/config
+      - RESTART_METHOD=socket
+      - TRAEFIK_CONTAINER=traefik-edge
+      - ACME_JSON_PATH=/srv/traefik/acme.json
+      - PLUGINS_DIR=/srv/traefik/plugins
+    volumes:
+      - /app/config:/app/config
+      - ./backups:/app/backups
+      - /srv/traefik/acme.json:/srv/traefik/acme.json:ro
+      - /srv/traefik/plugins:/srv/traefik/plugins:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro

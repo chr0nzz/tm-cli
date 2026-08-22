@@ -1,0 +1,59 @@
+networks:
+  traefik-net:
+    external: false
+    name: traefik-net
+
+services:
+  traefik:
+    image: traefik:latest
+    container_name: traefik
+    restart: unless-stopped
+    networks:
+      - traefik-net
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik/traefik.yml:/traefik.yml:ro
+      - ./traefik/acme.json:/acme.json
+      - ./traefik/logs:/logs
+      - ./traefik/config/dynamic.yml:/etc/traefik/config/dynamic.yml:ro
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.dashboard.rule=Host(`traefik.example.com`)"
+      - "traefik.http.routers.dashboard.entrypoints=websecure"
+      - "traefik.http.routers.dashboard.service=api@internal"
+      - "traefik.http.routers.dashboard.tls.certresolver=letsencrypt"
+      - "traefik-manager.role=traefik"
+      - "traefik-manager.static-config=/app/traefik.yml"
+      - "traefik-manager.restart-method=socket"
+
+  traefik-manager:
+    image: ghcr.io/chr0nzz/traefik-manager:latest
+    container_name: traefik-manager
+    restart: unless-stopped
+    networks:
+      - traefik-net
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik-manager/config:/app/config
+      - ./traefik-manager/backups:/app/backups
+      - ./traefik/traefik.yml:/app/traefik.yml
+      - ./traefik/config/dynamic.yml:/app/config/dynamic.yml
+    environment:
+      - COOKIE_SECURE=true
+      - STATIC_CONFIG_PATH=/app/traefik.yml
+      - RESTART_METHOD=socket
+      - TRAEFIK_CONTAINER=traefik
+      - CROWDSEC_LAPI_URL=http://crowdsec:8080
+      - CROWDSEC_API_KEY=${CROWDSEC_API_KEY}
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.traefik-manager.rule=Host(`manager.example.com`)"
+      - "traefik.http.routers.traefik-manager.entrypoints=websecure"
+      - "traefik.http.services.traefik-manager.loadbalancer.server.port=5000"
+      - "traefik.http.routers.traefik-manager.tls.certresolver=letsencrypt"
+    depends_on:
+      - traefik

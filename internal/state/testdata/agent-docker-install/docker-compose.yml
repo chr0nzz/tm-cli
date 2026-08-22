@@ -1,0 +1,39 @@
+services:
+
+  traefik-manager-agent:
+    image: ghcr.io/chr0nzz/traefik-manager-agent:latest
+    container_name: traefik-manager-agent
+    restart: unless-stopped
+    ports:
+      - "8090:8090"
+    environment:
+      - TMA_API_KEY=tma-api-key-PLACEHOLDER
+      - TRAEFIK_API_URL=http://traefik:8080
+      - TMA_RATE_LIMIT=300
+      - CONFIG_PATH=/app/config
+      - RESTART_METHOD=poison-pill
+      - SIGNAL_FILE_PATH=/signals/restart.sig
+      - ACCESS_LOG_PATH=/var/log/traefik/access.log
+      - CROWDSEC_LAPI_URL=http://crowdsec:8080
+      - CROWDSEC_API_KEY=crowdsec-api-key-PLACEHOLDER
+    volumes:
+      - /app/config:/app/config
+      - ./backups:/app/backups
+      - /var/log/traefik/access.log:/var/log/traefik/access.log:ro
+      - traefik-signals:/signals
+
+  crowdsec:
+    image: crowdsecurity/crowdsec:latest
+    container_name: crowdsec
+    restart: unless-stopped
+    environment:
+      - BOUNCER_KEY_tma=crowdsec-api-key-PLACEHOLDER
+      - COLLECTIONS=crowdsecurity/traefik
+    volumes:
+      - crowdsec_data:/var/lib/crowdsec/data
+      - ./crowdsec/acquis.yaml:/etc/crowdsec/acquis.yaml:ro
+      - /var/log/traefik/access.log:/var/log/traefik/access.log:ro
+
+volumes:
+  traefik-signals:
+  crowdsec_data:

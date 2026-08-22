@@ -1,0 +1,25 @@
+services:
+  traefik-manager:
+    image: ghcr.io/chr0nzz/traefik-manager:1.12.0
+    ports:
+      - target: 5000
+        published: 5100
+    environment:
+      COOKIE_SECURE: "false"
+      CONFIG_DIR: /app/config/dynamic
+      STATIC_CONFIG_PATH: /app/traefik.yml
+      RESTART_METHOD: socket
+      TRAEFIK_CONTAINER: traefik
+    volumes:
+      - type: bind
+        source: /srv/traefik/traefik.yml
+        target: /app/traefik.yml
+      - type: bind
+        source: /srv/tm/config
+        target: /app/config/dynamic
+    networks:
+      proxy: {}
+networks:
+  proxy:
+    external:
+      name: proxy

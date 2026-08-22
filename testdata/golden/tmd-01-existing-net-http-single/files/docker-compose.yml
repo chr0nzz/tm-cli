@@ -1,0 +1,26 @@
+networks:
+  traefik-net:
+    external: true
+    name: traefik-net
+
+services:
+  traefik-manager:
+    image: ghcr.io/chr0nzz/traefik-manager:latest
+    container_name: traefik-manager
+    restart: unless-stopped
+    networks:
+      - traefik-net
+    volumes:
+      - ./config:/app/config
+      - ./backups:/app/backups
+      - /var/log/traefik/access.log:/app/logs/access.log:ro
+      - /etc/traefik/acme.json:/app/acme.json:ro
+      - ./config/dynamic.yml:/app/config/dynamic.yml
+    environment:
+      - COOKIE_SECURE=true
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.traefik-manager.rule=Host(`manager.example.com`)"
+      - "traefik.http.routers.traefik-manager.entrypoints=websecure"
+      - "traefik.http.services.traefik-manager.loadbalancer.server.port=5000"
+      - "traefik.http.routers.traefik-manager.tls.certresolver=letsencrypt"

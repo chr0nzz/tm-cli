@@ -1,0 +1,26 @@
+[Unit]
+Description=Traefik Manager Agent
+After=network.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/traefik-manager-agent/env
+Environment="TRAEFIK_API_URL=http://localhost:8080"
+Environment="TRAEFIK_API_USER=traefik"
+Environment="CONFIG_PATH=/etc/traefik/conf.d"
+Environment="RESTART_METHOD=proxy"
+Environment="TRAEFIK_CONTAINER=traefik"
+Environment="DOCKER_HOST=tcp://127.0.0.1:2375"
+Environment="CROWDSEC_LAPI_URL=http://127.0.0.1:8080"
+Environment="GIT_BACKUP_ENABLED=true"
+Environment="GIT_BACKUP_REPO=git@github.com:example/traefik-config.git"
+Environment="GIT_BACKUP_BRANCH=main"
+Environment="GIT_BACKUP_USERNAME=deploy"
+Environment="GIT_BACKUP_AUTO_PUSH=true"
+Environment="TMA_PORT=8090"
+ExecStart=/usr/local/bin/tma
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

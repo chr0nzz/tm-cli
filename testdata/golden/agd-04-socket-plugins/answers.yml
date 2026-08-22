@@ -1,0 +1,22 @@
+mode: agent-docker
+dir: /srv/tma
+tls:
+  method: none
+agent:
+  traefik_url: http://traefik-edge:8080
+  config_path: /app/config
+  port: "9090"
+mounts:
+  access_logs: false
+  certs: true
+  acme_path: /srv/traefik/acme.json
+  static_config: false
+  plugins: true
+  plugins_dir: /srv/traefik/plugins
+restart:
+  method: socket
+  container: traefik-edge
+crowdsec:
+  mode: none
+secrets:
+  TMA_API_KEY: tma-api-key-PLACEHOLDER

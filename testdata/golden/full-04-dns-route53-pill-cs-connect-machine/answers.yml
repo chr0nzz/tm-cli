@@ -1,0 +1,34 @@
+mode: full
+dir: /srv/traefik-stack
+deployment: external
+domain: example.org
+hosts:
+  dashboard: edge.example.org
+  manager: manager.example.org
+dashboard: true
+tls:
+  method: dns
+  provider: route53
+  email: ops@example.org
+  vars:
+    AWS_REGION: eu-west-1
+config:
+  layout: directory
+mounts:
+  access_logs: true
+  certs: true
+  static_config: true
+restart:
+  method: poison-pill
+crowdsec:
+  mode: connect
+  lapi_url: http://10.0.0.5:8080
+  machine_id: traefik-manager
+network:
+  name: traefik-net
+  traefik_api_port: "8080"
+secrets:
+  AWS_ACCESS_KEY_ID: aws-access-key-id-PLACEHOLDER
+  AWS_SECRET_ACCESS_KEY: aws-secret-access-key-PLACEHOLDER
+  CROWDSEC_API_KEY: crowdsec-api-key-PLACEHOLDER
+  CROWDSEC_MACHINE_PASSWORD: crowdsec-machine-password-PLACEHOLDER

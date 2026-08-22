@@ -1,0 +1,24 @@
+mode: tm-docker
+dir: /srv/traefik-manager
+hosts:
+  manager: tm.example.com
+tls:
+  method: http
+  email: admin@example.com
+config:
+  layout: single
+mounts:
+  access_logs: true
+  access_log_path: /opt/traefik/logs/access.log
+  certs: true
+  acme_path: /opt/traefik/acme.json
+  static_config: true
+  static_config_path: /opt/traefik/traefik.yml
+restart:
+  method: proxy
+  container: traefik
+network:
+  name: traefik-net
+  external: true
+access:
+  via_traefik: true

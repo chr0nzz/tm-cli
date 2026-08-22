@@ -1,0 +1,15 @@
+http:
+  routers:
+    my-app:
+      rule: "Host(`app.example.com`)"
+      entryPoints:
+        - websecure
+      service: my-app
+      tls:
+        certResolver: ${CERT_RESOLVER}
+
+  services:
+    my-app:
+      loadBalancer:
+        servers:
+          - url: "http://my-app-container:3000"

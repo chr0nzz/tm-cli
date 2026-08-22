@@ -1,0 +1,82 @@
+networks:
+  traefik-net:
+    external: false
+    name: traefik-net
+  socket-proxy-net:
+    internal: true
+
+services:
+
+  traefik:
+    image: traefik:latest
+    container_name: traefik
+    restart: unless-stopped
+    networks:
+      - traefik-net
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik/traefik.yml:/traefik.yml:ro
+      - ./traefik/acme.json:/acme.json
+      - ./traefik/logs:/logs
+      - ./traefik/config/dynamic.yml:/etc/traefik/config/dynamic.yml:ro
+
+
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.dashboard.rule=Host(`traefik.example.org`)"
+      - "traefik.http.routers.dashboard.entrypoints=websecure"
+      - "traefik.http.routers.dashboard.service=api@internal"
+      - "traefik.http.routers.dashboard.tls.certresolver=letsencrypt"
+      - "traefik-manager.role=traefik"
+      - "traefik-manager.static-config=/app/traefik.yml"
+      - "traefik-manager.restart-method=proxy"
+
+  traefik-manager:
+    image: ghcr.io/chr0nzz/traefik-manager:latest
+    container_name: traefik-manager
+    restart: unless-stopped
+    networks:
+      - traefik-net
+      - socket-proxy-net
+    volumes:
+      - ./traefik-manager/config:/app/config
+      - ./traefik-manager/backups:/app/backups
+      - ./traefik/logs:/app/logs:ro
+      - ./traefik/traefik.yml:/app/traefik.yml
+      - ./traefik/config/dynamic.yml:/app/config/dynamic.yml
+    environment:
+      - COOKIE_SECURE=true
+
+      - STATIC_CONFIG_PATH=/app/traefik.yml
+      - RESTART_METHOD=proxy
+      - TRAEFIK_CONTAINER=traefik
+      - DOCKER_HOST=tcp://socket-proxy:2375
+      - CROWDSEC_LAPI_URL=http://10.0.0.5:8080
+      - CROWDSEC_API_KEY=crowdsec-api-key-PLACEHOLDER
+      - CROWDSEC_MACHINE_ID=tm-box
+      - CROWDSEC_MACHINE_PASSWORD=crowdsec-machine-password-PLACEHOLDER
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.traefik-manager.rule=Host(`manager.example.org`)"
+      - "traefik.http.routers.traefik-manager.entrypoints=websecure"
+      - "traefik.http.services.traefik-manager.loadbalancer.server.port=5000"
+      - "traefik.http.routers.traefik-manager.tls.certresolver=letsencrypt"
+    depends_on:
+      - traefik
+
+  socket-proxy:
+    image: tecnativa/docker-socket-proxy
+    container_name: socket-proxy
+    restart: unless-stopped
+    networks:
+      - socket-proxy-net
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      CONTAINERS: 1
+      POST: 1
+

@@ -1,0 +1,27 @@
+[Unit]
+Description=Traefik Manager
+After=network.target
+
+[Service]
+Type=simple
+User=alice
+WorkingDirectory=/srv/tm
+Environment="HOME=/srv/tm"
+ExecStart="/srv/tm/venv/bin/gunicorn" \
+    --bind 0.0.0.0:5050 \
+    --workers 1 \
+    --log-level info \
+    app:app
+Environment="CONFIG_PATH=/srv/traefik/dynamic.yml"
+Environment="BACKUP_DIR=/srv/tm-data/backups"
+Environment="SETTINGS_PATH=/srv/tm-data/manager.yml"
+Environment="COOKIE_SECURE=false"
+Environment="STATIC_CONFIG_PATH=/srv/traefik/traefik.yml"
+Environment="RESTART_METHOD=poison-pill"
+Environment="SIGNAL_FILE_PATH=/srv/traefik/signals/restart.sig"
+
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,32 @@
+mode: agent-binary
+tls:
+  method: none
+agent:
+  traefik_url: http://localhost:8080
+  basic_auth: true
+  basic_auth_user: traefik
+  config_path: /etc/traefik/conf.d
+  port: "8090"
+  git:
+    enabled: true
+    repo: git@github.com:example/traefik-config.git
+    branch: main
+    user: deploy
+    auto_push: true
+mounts:
+  access_logs: false
+  certs: false
+  static_config: false
+  plugins: false
+restart:
+  method: proxy
+  container: traefik
+  docker_host: tcp://127.0.0.1:2375
+crowdsec:
+  mode: connect
+  lapi_url: http://127.0.0.1:8080
+secrets:
+  TMA_API_KEY: tma-api-key-PLACEHOLDER
+  TRAEFIK_API_PASSWORD: traefik-api-password-PLACEHOLDER
+  CROWDSEC_API_KEY: crowdsec-api-key-PLACEHOLDER
+  GIT_BACKUP_TOKEN: git-backup-token-PLACEHOLDER

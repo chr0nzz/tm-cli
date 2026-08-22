@@ -1,0 +1,3 @@
+/etc/systemd/system/traefik-manager.service 0644 privileged
+/etc/systemd/system/traefik-restart.path 0644 privileged
+/etc/systemd/system/traefik-restart.service 0644 privileged

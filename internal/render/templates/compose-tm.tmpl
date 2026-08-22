@@ -1,0 +1,45 @@
+networks:
+  {{ .Network }}:
+    external: {{ .External }}
+    name: {{ .Network }}
+{{- if .SocketProxy }}
+  socket-proxy-net:
+    internal: true
+{{- end }}
+{{- if .PoisonPill }}
+
+volumes:
+  tm-signals:
+{{- end }}
+
+services:
+  traefik-manager:
+    image: ghcr.io/chr0nzz/traefik-manager:latest
+    container_name: traefik-manager
+    restart: unless-stopped
+    networks:
+      - {{ .Network }}
+{{- if .SocketProxy }}
+      - socket-proxy-net
+{{- end }}
+{{- if .Port }}
+    ports:
+      - "{{ .Port }}:5000"
+{{- end }}
+    volumes:
+{{- range .Volumes }}
+      - {{ . }}
+{{- end }}
+    environment:
+{{- range .Env }}
+      - {{ . }}
+{{- end }}
+{{- if .Labels }}
+    labels:
+{{- range .Labels }}
+      - "{{ . }}"
+{{- end }}
+{{- end }}
+{{- if .SocketProxy }}
+{{- template "socket-proxy" }}
+{{- end }}

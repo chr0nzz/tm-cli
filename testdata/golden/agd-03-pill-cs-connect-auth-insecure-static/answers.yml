@@ -1,0 +1,29 @@
+mode: agent-docker
+dir: /opt/traefik-manager-agent
+tls:
+  method: none
+agent:
+  traefik_url: https://traefik.internal:8443
+  insecure_tls: true
+  basic_auth: true
+  basic_auth_user: admin
+  config_path: /app/config
+  port: "8090"
+mounts:
+  access_logs: false
+  certs: true
+  acme_path: /etc/traefik/acme.json
+  static_config: true
+  static_config_path: /etc/traefik/traefik.yml
+  plugins: false
+restart:
+  method: poison-pill
+  container: traefik
+  signal_file: /signals/restart.sig
+crowdsec:
+  mode: connect
+  lapi_url: http://10.0.0.9:8080
+secrets:
+  TMA_API_KEY: tma-api-key-PLACEHOLDER
+  TRAEFIK_API_PASSWORD: traefik-api-password-PLACEHOLDER
+  CROWDSEC_API_KEY: crowdsec-api-key-PLACEHOLDER

@@ -1,0 +1,19 @@
+mode: tm-docker
+dir: /srv/traefik-manager
+config:
+  layout: single
+mounts:
+  access_logs: true
+  access_log_path: /var/log/traefik/access.log
+  certs: false
+  static_config: true
+  static_config_path: /etc/traefik/traefik.yml
+restart:
+  method: socket
+  container: traefik-prod
+network:
+  name: proxy
+  external: true
+access:
+  via_traefik: false
+  port: "8081"

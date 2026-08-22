@@ -1,0 +1,46 @@
+networks:
+  traefik-net:
+    external: true
+    name: traefik-net
+  socket-proxy-net:
+    internal: true
+
+services:
+  traefik-manager:
+    image: ghcr.io/chr0nzz/traefik-manager:latest
+    container_name: traefik-manager
+    restart: unless-stopped
+    networks:
+      - traefik-net
+      - socket-proxy-net
+
+    volumes:
+      - ./config:/app/config
+      - ./backups:/app/backups
+      - /etc/traefik/traefik.yml:/app/traefik.yml
+      - ./config/dynamic.yml:/app/config/dynamic.yml
+    environment:
+      - COOKIE_SECURE=false
+
+      - STATIC_CONFIG_PATH=/app/traefik.yml
+      - RESTART_METHOD=proxy
+      - TRAEFIK_CONTAINER=traefik
+      - DOCKER_HOST=tcp://socket-proxy:2375
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.traefik-manager.rule=Host(`tm.lab.internal`)"
+      - "traefik.http.routers.traefik-manager.entrypoints=web"
+      - "traefik.http.services.traefik-manager.loadbalancer.server.port=5000"
+
+
+  socket-proxy:
+    image: tecnativa/docker-socket-proxy
+    container_name: socket-proxy
+    restart: unless-stopped
+    networks:
+      - socket-proxy-net
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      CONTAINERS: 1
+      POST: 1
