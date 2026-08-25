@@ -30,6 +30,7 @@ type installFlags struct {
 	traefikURL string
 	dryRun     bool
 	yes        bool
+	channel    string
 }
 
 func newInstallCmd() *cobra.Command {
@@ -55,6 +56,8 @@ Non-interactive: --answers file.yml (see --dump-answers), secrets from env vars 
 	cmd.Flags().StringVar(&f.traefikURL, "traefik-url", "", "agent: Traefik API URL")
 	cmd.Flags().BoolVar(&f.dryRun, "dry-run", false, "render all files, start nothing")
 	cmd.Flags().BoolVarP(&f.yes, "yes", "y", false, "assume yes for confirmations and skip the firewall pause")
+	cmd.Flags().StringVar(&f.channel, "channel", "", "release channel: stable or beta (beta tracks the next release)")
+	_ = cmd.Flags().MarkHidden("channel")
 	return cmd
 }
 
@@ -95,6 +98,9 @@ func runInstall(f installFlags, dirFlag string) error {
 	}
 	if f.traefikURL != "" {
 		a.Agent.TraefikURL = f.traefikURL
+	}
+	if f.channel != "" {
+		a.Channel = f.channel
 	}
 	a.LoadSecretsFromEnv()
 	a.Finalize()

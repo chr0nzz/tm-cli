@@ -468,3 +468,44 @@ func TestRouterHostAcceptsQuotes(t *testing.T) {
 		t.Fatalf("got %q %v", h, ok)
 	}
 }
+
+func TestAdoptDetectsTheBetaChannel(t *testing.T) {
+	for _, tc := range []struct {
+		tag  string
+		want string
+	}{
+		{"latest", answers.ChannelStable},
+		{"beta", answers.ChannelBeta},
+		{"1.12.0", answers.ChannelStable},
+	} {
+		dir := t.TempDir()
+		isolate(t)
+		compose := "services:\n  traefik-manager:\n    image: ghcr.io/chr0nzz/traefik-manager:" + tc.tag + "\n    ports:\n      - \"5000:5000\"\n"
+		if err := os.WriteFile(filepath.Join(dir, "docker-compose.yml"), []byte(compose), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		st, _, err := Adopt(dir)
+		if err != nil {
+			t.Fatalf("%s: %v", tc.tag, err)
+		}
+		if st.Answers.Channel != tc.want {
+			t.Errorf("tag %s: channel = %q, want %q", tc.tag, st.Answers.Channel, tc.want)
+		}
+	}
+}
+
+func TestImageTag(t *testing.T) {
+	cases := map[string]string{
+		"ghcr.io/chr0nzz/traefik-manager:beta":   "beta",
+		"ghcr.io/chr0nzz/traefik-manager:latest": "latest",
+		"ghcr.io/chr0nzz/traefik-manager":        "",
+		"traefik:v3.1":                           "v3.1",
+		"registry:5000/thing":                    "",
+		"repo/img@sha256:abc":                    "",
+	}
+	for in, want := range cases {
+		if got := imageTag(in); got != want {
+			t.Errorf("imageTag(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

@@ -5,6 +5,7 @@ import (
 )
 
 type fullView struct {
+	Image           string
 	Network         string
 	NetworkExternal bool
 	SocketProxy     bool
@@ -58,6 +59,7 @@ func newFullView(a *answers.Answers) fullView {
 	single := a.Config.Layout == answers.LayoutSingle
 	install := a.CrowdSec.Mode == answers.CrowdSecInstall
 	v := fullView{
+		Image:           answers.ManagerImage + ":" + a.ImageTag(),
 		Network:         a.Network.Name,
 		NetworkExternal: a.Network.External,
 		SocketProxy:     proxy,

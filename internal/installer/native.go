@@ -31,13 +31,13 @@ func (in *Installer) installNative(ctx context.Context, a *answers.Answers, out 
 			return err
 		}
 		if host.NeedsPrivilege(filepath.Dir(dir)) {
-			if err := host.Run(host.Privileged(ctx, "git", "clone", "--branch", "main", nativeRepo, dir)); err != nil {
+			if err := host.Run(host.Privileged(ctx, "git", "clone", "--branch", a.GitBranch(), nativeRepo, dir)); err != nil {
 				return err
 			}
 			if err := host.Chown(dir, host.CurrentUser(), true); err != nil {
 				return err
 			}
-		} else if err := host.Run(host.Command(ctx, "git", "clone", "--branch", "main", nativeRepo, dir)); err != nil {
+		} else if err := host.Run(host.Command(ctx, "git", "clone", "--branch", a.GitBranch(), nativeRepo, dir)); err != nil {
 			return err
 		}
 	}
@@ -126,7 +126,10 @@ func (in *Installer) updateNative(ctx context.Context, a *answers.Answers) error
 		owner = nativeUser
 	}
 	home := "HOME=" + dir
+	branch := a.GitBranch()
 	steps := [][]string{
+		{"env", home, "git", "-C", dir, "fetch", "origin", branch},
+		{"env", home, "git", "-C", dir, "checkout", branch},
 		{"env", home, "git", "-C", dir, "pull"},
 		{"env", home, filepath.Join(dir, "venv", "bin", "pip"), "install", "-q", "--no-cache-dir", "-r", filepath.Join(dir, "requirements.txt"), "gunicorn"},
 		{"env", home, "bash", filepath.Join(dir, "scripts", "setup-assets.sh")},

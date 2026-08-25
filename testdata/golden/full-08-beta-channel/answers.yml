@@ -1,0 +1,22 @@
+mode: full
+channel: beta
+dir: /srv/traefik-stack
+deployment: external
+domain: example.com
+dashboard: true
+tls:
+  method: http
+  email: admin@example.com
+config:
+  layout: single
+mounts:
+  access_logs: true
+  certs: true
+  static_config: false
+restart:
+  method: none
+crowdsec:
+  mode: none
+network:
+  name: traefik-net
+  traefik_api_port: "8080"

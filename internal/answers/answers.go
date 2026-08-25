@@ -92,6 +92,12 @@ const (
 
 	CertResolver     = "letsencrypt"
 	DNSProviderOther = "other"
+
+	ChannelStable = "stable"
+	ChannelBeta   = "beta"
+
+	ManagerImage = "ghcr.io/chr0nzz/traefik-manager"
+	AgentImage   = "ghcr.io/chr0nzz/traefik-manager-agent"
 )
 
 type Hosts struct {
@@ -186,6 +192,7 @@ type Agent struct {
 
 type Answers struct {
 	Mode       Mode              `yaml:"mode"`
+	Channel    string            `yaml:"channel,omitempty"`
 	Dir        string            `yaml:"dir,omitempty"`
 	Deployment string            `yaml:"deployment,omitempty"`
 	Domain     string            `yaml:"domain,omitempty"`
@@ -229,6 +236,7 @@ func homeDir() string {
 func Defaults(mode Mode) *Answers {
 	a := &Answers{
 		Mode:       mode,
+		Channel:    ChannelStable,
 		Deployment: DeploymentExternal,
 		Dashboard:  true,
 		TLS:        TLS{Method: TLSHTTP},
@@ -293,7 +301,24 @@ func (a *Answers) Clone() *Answers {
 	return &c
 }
 
+func (a *Answers) ImageTag() string {
+	if a.Channel == ChannelBeta {
+		return ChannelBeta
+	}
+	return "latest"
+}
+
+func (a *Answers) GitBranch() string {
+	if a.Channel == ChannelBeta {
+		return "dev"
+	}
+	return "main"
+}
+
 func (a *Answers) Finalize() {
+	if a.Channel == "" {
+		a.Channel = ChannelStable
+	}
 	switch a.Mode {
 	case ModeTMNative, ModeAgentDocker, ModeAgentBinary:
 		a.TLS = TLS{Method: TLSNone}
@@ -439,6 +464,12 @@ func (a *Answers) Scheme() string {
 func (a *Answers) Validate() error {
 	if !a.Mode.Valid() {
 		return fmt.Errorf("unknown mode %q (valid: %s)", a.Mode, joinModes())
+	}
+	if err := oneOf("channel", a.Channel, ChannelStable, ChannelBeta); err != nil {
+		return err
+	}
+	if a.Channel == ChannelBeta && a.Mode == ModeAgentBinary {
+		return fmt.Errorf("there is no beta build of the agent binary, it ships only in releases: use the stable channel, or run the agent with docker")
 	}
 	if a.Mode.IsDocker() && a.Dir == "" {
 		return fmt.Errorf("dir is required")

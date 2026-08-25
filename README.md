@@ -137,6 +137,26 @@ tm install --dry-run --answers answers.yml --output ./out
 
 ---
 
+## Beta channel
+
+Beta tracks the `dev` branch of Traefik Manager, ahead of the next release. It is not offered in the wizard, only as a flag:
+
+```bash
+tm install --channel beta        # a new install on beta
+tm update --channel beta         # move an existing install
+tm update --channel stable       # move it back
+```
+
+| Mode | stable | beta |
+|---|---|---|
+| Docker modes | `:latest` images | `:beta` images |
+| Linux service | tracks `main` | tracks `dev` |
+| Agent binary | releases only | not available, use the Docker agent |
+
+`tm` stores the channel, so a plain `tm update` keeps an install where it is, and `tm status` shows which channel it is on. Switching rewrites the image tag in `docker-compose.yml`, or checks out the other branch for a Linux service, then updates and restarts. Details and what to expect: [Beta](https://traefik-manager.xyzlab.dev/beta).
+
+---
+
 ## Existing installs
 
 Installs made by the old `setup.sh` are adopted automatically:

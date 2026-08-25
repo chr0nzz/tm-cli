@@ -420,6 +420,10 @@ compare_docker_tree() {
         cp "$norm/$rel.tm" "$norm/$rel"
       fi
     fi
+    if [[ "$rel" == docker-compose.yml && "${ans_channel:-stable}" == beta ]]; then
+      note_dev "$name: the beta image tag has no legacy equivalent, only the tag is normalised"
+      sed -i 's|\(image: ghcr.io/chr0nzz/traefik-manager[a-z-]*\):beta|\1:latest|' "$norm/$rel.tm"
+    fi
     if [[ "$rel" == docker-compose.yml && "${ans_mode:-}" == agent-docker-traefik ]]; then
       case "${ans_restart_method:-none}" in
         proxy|poison-pill)
@@ -564,13 +568,15 @@ run_scenario() {
       return 1
       ;;
   esac > /dev/null
+  local tree_status=0 env_status=0
   case "$ans_mode" in
-    tm-native|agent-binary) compare_systemd_tree ;;
+    tm-native|agent-binary) compare_systemd_tree || tree_status=1 ;;
     *)
-      compare_docker_tree
-      check_docker_env
+      compare_docker_tree || tree_status=1
+      check_docker_env || env_status=1
       ;;
   esac
+  [[ $tree_status -eq 0 && $env_status -eq 0 ]]
 }
 
 status=0

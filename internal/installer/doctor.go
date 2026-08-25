@@ -208,6 +208,11 @@ func (in *Installer) checks(st *state.State) []Check {
 			return lapiReachable(ctx, a.CrowdSec.LAPIURL, key)
 		}, Advice: "tm logs crowdsec"})
 	}
+	if a.Channel == answers.ChannelBeta {
+		checks = append(checks, Check{Name: "release channel", Soft: true, Run: func(ctx context.Context) (bool, string) {
+			return false, "beta: this install tracks the next release, switch back with tm update --channel stable"
+		}})
+	}
 	checks = append(checks, Check{Name: "health endpoint answers", Run: func(ctx context.Context) (bool, string) {
 		h := in.CheckHealth(ctx, st)
 		if !h.OK {

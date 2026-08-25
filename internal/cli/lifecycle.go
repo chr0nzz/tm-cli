@@ -41,7 +41,8 @@ func newStatusCmd() *cobra.Command {
 }
 
 func newUpdateCmd() *cobra.Command {
-	return &cobra.Command{
+	var channel string
+	cmd := &cobra.Command{
 		Use:   "update",
 		Short: "Update to the latest images, code, or agent binary and restart",
 		Args:  cobra.NoArgs,
@@ -54,12 +55,23 @@ func newUpdateCmd() *cobra.Command {
 				return err
 			}
 			inst := newInstaller(u, false)
+			if channel != "" {
+				if err := inst.SwitchChannel(ctx, st, channel); err != nil {
+					return err
+				}
+			}
 			if err := inst.Update(ctx, st); err != nil {
 				return err
+			}
+			if err := st.Save(); err != nil {
+				u.Warn("could not save tm state: " + err.Error())
 			}
 			return inst.Status(ctx, st)
 		},
 	}
+	cmd.Flags().StringVar(&channel, "channel", "", "switch release channel: stable or beta")
+	_ = cmd.Flags().MarkHidden("channel")
+	return cmd
 }
 
 func newLogsCmd() *cobra.Command {

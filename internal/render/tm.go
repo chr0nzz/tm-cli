@@ -8,6 +8,7 @@ import (
 )
 
 type tmView struct {
+	Image       string
 	Network     string
 	External    bool
 	SocketProxy bool
@@ -37,6 +38,7 @@ func newTMView(a *answers.Answers) tmView {
 	socket := static && a.Restart.Method == answers.RestartSocket
 	single := a.Config.Layout == answers.LayoutSingle
 	v := tmView{
+		Image:       answers.ManagerImage + ":" + a.ImageTag(),
 		Network:     a.Network.Name,
 		External:    a.Network.External,
 		SocketProxy: proxy,

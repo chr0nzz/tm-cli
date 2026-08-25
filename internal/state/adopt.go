@@ -71,6 +71,12 @@ func inspectCompose(dir string) (*State, map[string]string, error) {
 		return nil, nil, fmt.Errorf("parse %s: %w", composePath, err)
 	}
 	tm, agent, traefik := c.find(imageTM), c.find(imageAgent), c.find(imageTraefik)
+	channel := answers.ChannelStable
+	for _, svc := range []*service{tm, agent} {
+		if svc != nil && imageTag(svc.Image) == answers.ChannelBeta {
+			channel = answers.ChannelBeta
+		}
+	}
 	var mode answers.Mode
 	switch {
 	case tm != nil && traefik != nil:
@@ -85,6 +91,7 @@ func inspectCompose(dir string) (*State, map[string]string, error) {
 		return nil, nil, fmt.Errorf("%w: %s", ErrNotAdoptable, composePath)
 	}
 	a := answers.Defaults(mode)
+	a.Channel = channel
 	a.Dir = abs
 	ad := &adopter{c: c, a: a, secrets: map[string]string{}}
 	owned := map[string]string{composeFileName: Hash(data)}

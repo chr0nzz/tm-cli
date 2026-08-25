@@ -142,6 +142,7 @@ func agentNamedVolumes(a *answers.Answers) []string {
 }
 
 type agentView struct {
+	Image        string
 	Port         string
 	Env          []string
 	Volumes      []string
@@ -153,6 +154,7 @@ func renderAgentDocker(a *answers.Answers) (*Output, error) {
 	install := a.CrowdSec.Mode == answers.CrowdSecInstall
 	p := agentDockerPaths(a)
 	v := agentView{
+		Image:        answers.AgentImage + ":" + a.ImageTag(),
 		Port:         a.Agent.Port,
 		Env:          envLines(agentEnv(a, p, true), true),
 		NamedVolumes: agentNamedVolumes(a),
@@ -197,6 +199,7 @@ func renderAgentDocker(a *answers.Answers) (*Output, error) {
 }
 
 type agentTraefikView struct {
+	Image           string
 	Network         string
 	NetworkExternal bool
 	APIPort         string
@@ -220,6 +223,7 @@ func renderAgentDockerTraefik(a *answers.Answers) (*Output, error) {
 	single := a.Config.Layout == answers.LayoutSingle
 	p := agentTraefikPaths(a)
 	v := agentTraefikView{
+		Image:           answers.AgentImage + ":" + a.ImageTag(),
 		Network:         a.Network.Name,
 		NetworkExternal: a.Network.External,
 		APIPort:         a.Network.TraefikAPIPort,

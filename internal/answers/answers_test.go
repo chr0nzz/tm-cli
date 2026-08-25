@@ -204,3 +204,41 @@ func TestValidateAcceptsRealisticValues(t *testing.T) {
 		t.Fatal("an enabled mount with no path must be rejected in every mode")
 	}
 }
+
+func TestChannel(t *testing.T) {
+	a := Defaults(ModeFull)
+	if a.Channel != ChannelStable || a.ImageTag() != "latest" || a.GitBranch() != "main" {
+		t.Fatalf("stable defaults wrong: %+v", a.Channel)
+	}
+	a.Channel = ChannelBeta
+	if a.ImageTag() != "beta" || a.GitBranch() != "dev" {
+		t.Fatalf("beta mapping wrong: %s %s", a.ImageTag(), a.GitBranch())
+	}
+	a.Domain = "example.com"
+	a.TLS.Email = "me@example.com"
+	a.Finalize()
+	if err := a.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	b := Defaults(ModeAgentBinary)
+	b.Channel = ChannelBeta
+	b.SetSecret(SecretTMAAPIKey, "k")
+	b.Finalize()
+	if err := b.Validate(); err == nil {
+		t.Fatal("the agent binary has no beta build, this must be refused")
+	}
+	c := Defaults(ModeFull)
+	c.Channel = "nightly"
+	c.Domain = "example.com"
+	c.TLS.Email = "me@example.com"
+	c.Finalize()
+	if err := c.Validate(); err == nil {
+		t.Fatal("an unknown channel must be refused")
+	}
+	d := Defaults(ModeFull)
+	d.Channel = ""
+	d.Finalize()
+	if d.Channel != ChannelStable {
+		t.Fatalf("an empty channel must normalise to stable, got %q", d.Channel)
+	}
+}

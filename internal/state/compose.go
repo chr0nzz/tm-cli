@@ -339,3 +339,15 @@ func ServiceNames(data []byte) ([]string, error) {
 	sort.Strings(names)
 	return names, nil
 }
+
+func imageTag(image string) string {
+	name := image
+	if i := strings.Index(name, "@"); i >= 0 {
+		name = name[:i]
+	}
+	slash := strings.LastIndex(name, "/")
+	if i := strings.LastIndex(name, ":"); i > slash {
+		return name[i+1:]
+	}
+	return ""
+}

@@ -15,6 +15,7 @@ import (
 
 	"github.com/chr0nzz/traefik-stack/internal/answers"
 	"github.com/chr0nzz/traefik-stack/internal/host"
+	"github.com/chr0nzz/traefik-stack/internal/render"
 	"github.com/chr0nzz/traefik-stack/internal/state"
 	"github.com/chr0nzz/traefik-stack/internal/ui"
 )
@@ -66,6 +67,7 @@ func (in *Installer) Status(ctx context.Context, st *state.State) error {
 	if !st.InstalledAt.IsZero() {
 		u.KV("Installed at", st.InstalledAt.Local().Format("2006-01-02 15:04"))
 	}
+	u.KV("Channel", channelLabel(&st.Answers))
 	u.KV("State file", ui.MutedStyle.Render(st.Path))
 	u.Heading("Services")
 	running := true
@@ -252,6 +254,39 @@ func (in *Installer) waitHealthy(ctx context.Context, st *state.State, timeout t
 			in.UI.Info("waiting for it to answer")
 		}
 	}
+}
+
+func (in *Installer) SwitchChannel(ctx context.Context, st *state.State, channel string) error {
+	if st.Answers.Channel == channel {
+		return nil
+	}
+	a := st.Answers.Clone()
+	a.Channel = channel
+	a.Finalize()
+	if err := a.Validate(); err != nil {
+		return err
+	}
+	st.Answers.Channel = channel
+	if st.Mode.IsDocker() {
+		out, err := render.Render(render.Input{Answers: a, User: host.CurrentUser()})
+		if err != nil {
+			return err
+		}
+		for _, f := range out.Files {
+			if f.Path != "docker-compose.yml" {
+				continue
+			}
+			if err := host.WriteFile(filepath.Join(st.Dir, f.Path), []byte(f.Content), f.Mode); err != nil {
+				return err
+			}
+			if st.OwnedFiles == nil {
+				st.OwnedFiles = map[string]string{}
+			}
+			st.OwnedFiles[f.Path] = state.Hash([]byte(f.Content))
+		}
+	}
+	in.UI.OK("switched to the " + channel + " channel")
+	return nil
 }
 
 func (in *Installer) Update(ctx context.Context, st *state.State) error {
@@ -514,4 +549,11 @@ func (in *Installer) composeFile(st *state.State) string {
 func fileExists(p string) bool {
 	_, err := os.Stat(p)
 	return err == nil
+}
+
+func channelLabel(a *answers.Answers) string {
+	if a.Channel == answers.ChannelBeta {
+		return ui.WarnStyle.Render("beta") + "  " + ui.MutedStyle.Render("tracks the next release")
+	}
+	return "stable"
 }

@@ -44,7 +44,7 @@ services:
 {{- end }}
 
   traefik-manager:
-    image: ghcr.io/chr0nzz/traefik-manager:latest
+    image: {{ .Image }}
     container_name: traefik-manager
     restart: unless-stopped
     networks:
