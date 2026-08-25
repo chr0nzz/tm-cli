@@ -88,3 +88,61 @@ func TestInstallDryRunRendersAnswers(t *testing.T) {
 		t.Fatalf("dump wrong:\n%s", dump)
 	}
 }
+
+func TestPasswordValidation(t *testing.T) {
+	cases := map[string]bool{
+		"":                       false,
+		"short7x":                false,
+		"exactly8":               true,
+		strings.Repeat("a", 72):  true,
+		strings.Repeat("a", 73):  false,
+		strings.Repeat("é", 36):  true,
+		strings.Repeat("é", 37):  false,
+		"a password with spaces": true,
+	}
+	for pw, ok := range cases {
+		err := passwordError(pw)
+		if ok && err != nil {
+			t.Errorf("%q (%d bytes) should be accepted: %v", pw, len(pw), err)
+		}
+		if !ok && err == nil {
+			t.Errorf("%q (%d bytes) should be rejected", pw, len(pw))
+		}
+	}
+}
+
+func TestReadPasswordStdin(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{"correct-horse\n", "correct-horse"},
+		{"correct-horse", "correct-horse"},
+		{"correct-horse\r\n", "correct-horse"},
+		{"correct-horse\nsecond line\n", "correct-horse"},
+		{bom + "correct-horse\n", "correct-horse"},
+		{"  padded spaces  \n", "  padded spaces  "},
+	}
+	for _, c := range cases {
+		got, err := readPasswordStdin(strings.NewReader(c.in))
+		if err != nil {
+			t.Errorf("%q: %v", c.in, err)
+			continue
+		}
+		if got != c.want {
+			t.Errorf("%q -> %q, want %q", c.in, got, c.want)
+		}
+	}
+	for _, bad := range []string{"", "\n", "short\n"} {
+		if _, err := readPasswordStdin(strings.NewReader(bad)); err == nil {
+			t.Errorf("%q should be rejected", bad)
+		}
+	}
+}
+
+func TestPasswordResetFlagConflict(t *testing.T) {
+	_, err := run(t, "password", "reset", "--random", "--stdin")
+	if err == nil || !strings.Contains(err.Error(), "cannot be combined") {
+		t.Fatalf("expected a flag conflict error, got %v", err)
+	}
+}

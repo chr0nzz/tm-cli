@@ -116,7 +116,7 @@ func newControlCmd(action, short string) *cobra.Command {
 }
 
 func newPasswordCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "password",
 		Short: "Print the auto-generated temporary password from the logs",
 		Args:  cobra.NoArgs,
@@ -136,6 +136,70 @@ func newPasswordCmd() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.AddCommand(newPasswordResetCmd())
+	return cmd
+}
+
+func newPasswordResetCmd() *cobra.Command {
+	var random, fromStdin, disableOTP, yes bool
+	cmd := &cobra.Command{
+		Use:   "reset",
+		Short: "Set a new Traefik Manager password",
+		Long: `Asks for a new password and sets it, so you can log straight in.
+
+Runs Traefik Manager's own reset command, as the user that owns its settings file.
+With --random it generates a temporary password instead and forces a change at next
+login, which also leaves the /setup page open until a password is set there.`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if random && fromStdin {
+				return errors.New("--random cannot be combined with --stdin")
+			}
+			ctx, cancel := signalContext()
+			defer cancel()
+			u := ui.New()
+			st, err := resolveState(cmd, u)
+			if err != nil {
+				return err
+			}
+			inst := newInstaller(u, yes)
+			opts := installer.PasswordResetOptions{Random: random, DisableOTP: disableOTP}
+			if !random {
+				ok, err := inst.SupportsChosenPassword(ctx, st)
+				if err != nil {
+					return err
+				}
+				if !ok {
+					return errors.New("this Traefik Manager is too old to set a chosen password: run tm update first, or use tm password reset --random for a temporary one")
+				}
+				pw, err := collectPassword(ctx, fromStdin, yes)
+				if err != nil {
+					return handleAbort(err)
+				}
+				opts.Password = pw
+			} else if !yes {
+				ok, err := confirmReset(st.Mode)
+				if err != nil || !ok {
+					return handleAbort(err)
+				}
+			}
+			if err := inst.ResetPassword(ctx, st, opts); err != nil {
+				return err
+			}
+			u.Blank()
+			if random {
+				u.Warn("this form leaves /setup open until a password is set there, see https://traefik-manager.xyzlab.dev/reset-password")
+			} else {
+				u.OK("log in with the new password, no forced change and /setup stays closed")
+			}
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&random, "random", false, "generate a temporary password and force a change at next login")
+	cmd.Flags().BoolVar(&fromStdin, "stdin", false, "read the new password from standard input")
+	cmd.Flags().BoolVar(&disableOTP, "disable-otp", false, "also turn two-factor authentication off")
+	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "do not ask for confirmation")
+	return cmd
 }
 
 func newUninstallCmd() *cobra.Command {

@@ -7,7 +7,9 @@ import (
 	"io/fs"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 )
@@ -181,4 +183,20 @@ func Remove(path string, recursive bool) error {
 	}
 	args = append(args, path)
 	return Run(Privileged(context.Background(), "rm", args...))
+}
+
+func FileOwner(path string) (string, error) {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return "", err
+	}
+	st, ok := fi.Sys().(*syscall.Stat_t)
+	if !ok {
+		return "", fmt.Errorf("cannot read the owner of %s", path)
+	}
+	uid := strconv.FormatUint(uint64(st.Uid), 10)
+	if u, err := user.LookupId(uid); err == nil {
+		return u.Username, nil
+	}
+	return uid, nil
 }

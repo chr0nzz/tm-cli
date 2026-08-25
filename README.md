@@ -50,6 +50,7 @@ curl -fsSL https://get-traefik.xyzlab.dev | bash -s -- --mode agent
 | `tm logs [service]` | Follows the logs (`--no-follow`, `-n <lines>`) |
 | `tm restart`, `tm start`, `tm stop` | Whole install, or one service |
 | `tm password` | Prints the temporary password from the logs |
+| `tm password reset` | Asks for a new password and sets it (`--random`, `--stdin`, `--disable-otp`) |
 | `tm reconfigure [--section <id>]` | Re-runs the wizard pre-filled, regenerates tm-owned files, restarts (`--list` shows the sections) |
 | `tm add crowdsec` | Adds CrowdSec to an existing install |
 | `tm doctor` | Checks Docker, ports, DNS, `acme.json`, health endpoints, CrowdSec |
