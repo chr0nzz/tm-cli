@@ -9,13 +9,13 @@ An interactive script that asks what you want to install and how, then generates
 ## Quick start
 
 ```bash
-curl -fsSL https://get-traefik.xyzlab.dev | bash
+curl -fsSL https://get-traefik.xyzlab.dev/legacy | bash
 ```
 
 Or if you prefer to review the script before running:
 
 ```bash
-curl -fsSL https://get-traefik.xyzlab.dev -o setup.sh
+curl -fsSL https://get-traefik.xyzlab.dev/legacy -o setup.sh
 chmod +x setup.sh
 ./setup.sh
 ```
