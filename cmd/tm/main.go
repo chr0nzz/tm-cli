@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"github.com/chr0nzz/traefik-stack/internal/cli"
+	"github.com/chr0nzz/tm-cli/internal/cli"
 )
 
 var version = "dev"

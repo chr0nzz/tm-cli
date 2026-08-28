@@ -6,7 +6,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/chr0nzz/traefik-stack/internal/answers"
+	"github.com/chr0nzz/tm-cli/internal/answers"
 )
 
 var (

@@ -9,11 +9,11 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/chr0nzz/traefik-stack/internal/answers"
-	"github.com/chr0nzz/traefik-stack/internal/installer"
-	"github.com/chr0nzz/traefik-stack/internal/state"
-	"github.com/chr0nzz/traefik-stack/internal/ui"
-	"github.com/chr0nzz/traefik-stack/internal/wizard"
+	"github.com/chr0nzz/tm-cli/internal/answers"
+	"github.com/chr0nzz/tm-cli/internal/installer"
+	"github.com/chr0nzz/tm-cli/internal/state"
+	"github.com/chr0nzz/tm-cli/internal/ui"
+	"github.com/chr0nzz/tm-cli/internal/wizard"
 )
 
 func init() {

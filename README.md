@@ -1,6 +1,8 @@
-# traefik-stack
+# tm
 
-One-command installer for [Traefik](https://github.com/traefik/traefik) and [Traefik Manager](https://github.com/chr0nzz/traefik-manager).
+One-command installer and CLI for [Traefik](https://github.com/traefik/traefik) and [Traefik Manager](https://github.com/chr0nzz/traefik-manager).
+
+Formerly `traefik-stack`. The one-liner, the install directory and every existing install are unchanged.
 
 `tm` is a CLI that asks what you want to install and how, generates all required config files, starts the services, and manages the install afterwards.
 
@@ -74,7 +76,7 @@ Commands find the install from `--dir` or `TM_DIR`, then the current directory, 
 | `agent-docker-traefik` | Traefik Manager Agent, Docker - Agent + Traefik | Traefik and the agent via Docker Compose |
 | `agent-binary` | Traefik Manager Agent, Binary - Agent only | `tma` binary as a systemd service |
 
-`tm install --mode <mode>` skips the menu. `--mode agent` (or `TMA_INSTALL=1`) asks only which agent method. The wizard keeps the same sections and review screen as before and writes nothing until you confirm. Full details per mode: [traefik-manager.xyzlab.dev/traefik-stack](https://traefik-manager.xyzlab.dev/traefik-stack)
+`tm install --mode <mode>` skips the menu. `--mode agent` (or `TMA_INSTALL=1`) asks only which agent method. The wizard keeps the same sections and review screen as before and writes nothing until you confirm. Full details per mode: [traefik-manager.xyzlab.dev/tm-cli](https://traefik-manager.xyzlab.dev/tm-cli)
 
 ---
 
@@ -237,7 +239,7 @@ The Linux service keeps its record in `/etc/traefik-manager/tm-state.yml`, the b
 
 ## Documentation
 
-Full setup guide and configuration reference: [traefik-manager.xyzlab.dev/traefik-stack](https://traefik-manager.xyzlab.dev/traefik-stack)
+Full setup guide and configuration reference: [traefik-manager.xyzlab.dev/tm-cli](https://traefik-manager.xyzlab.dev/tm-cli)
 
 ---
 

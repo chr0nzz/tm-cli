@@ -34,9 +34,9 @@ func TestAssetURL(t *testing.T) {
 	cases := []struct {
 		repo, version, asset, want string
 	}{
-		{Repo, "latest", "tm-linux-amd64", "https://github.com/chr0nzz/traefik-stack/releases/latest/download/tm-linux-amd64"},
-		{Repo, "v1.12.0", "SHA256SUMS", "https://github.com/chr0nzz/traefik-stack/releases/download/v1.12.0/SHA256SUMS"},
-		{Repo, "1.12.0", "tm-linux-arm64", "https://github.com/chr0nzz/traefik-stack/releases/download/v1.12.0/tm-linux-arm64"},
+		{Repo, "latest", "tm-linux-amd64", "https://github.com/chr0nzz/tm-cli/releases/latest/download/tm-linux-amd64"},
+		{Repo, "v1.12.0", "SHA256SUMS", "https://github.com/chr0nzz/tm-cli/releases/download/v1.12.0/SHA256SUMS"},
+		{Repo, "1.12.0", "tm-linux-arm64", "https://github.com/chr0nzz/tm-cli/releases/download/v1.12.0/tm-linux-arm64"},
 		{AgentRepo, "", "tma-linux-armv7", "https://github.com/chr0nzz/traefik-manager/releases/latest/download/tma-linux-armv7"},
 	}
 	for _, c := range cases {
@@ -99,8 +99,8 @@ func TestLatestVersion(t *testing.T) {
 		gotUA = r.Header.Get("User-Agent")
 		gotMethod = r.Method
 		switch r.URL.Path {
-		case "/chr0nzz/traefik-stack/releases/latest":
-			w.Header().Set("Location", "https://github.com/chr0nzz/traefik-stack/releases/tag/v1.12.0")
+		case "/chr0nzz/tm-cli/releases/latest":
+			w.Header().Set("Location", "https://github.com/chr0nzz/tm-cli/releases/tag/v1.12.0")
 			w.WriteHeader(http.StatusFound)
 		case "/none/none/releases/latest":
 			w.WriteHeader(http.StatusNotFound)
@@ -138,13 +138,13 @@ func TestDownload(t *testing.T) {
 	useServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits = append(hits, r.URL.Path)
 		switch r.URL.Path {
-		case "/chr0nzz/traefik-stack/releases/download/v1.0.0/tm-linux-amd64":
+		case "/chr0nzz/tm-cli/releases/download/v1.0.0/tm-linux-amd64":
 			w.Write(data)
-		case "/chr0nzz/traefik-stack/releases/download/v1.0.0/tm-linux-arm64":
+		case "/chr0nzz/tm-cli/releases/download/v1.0.0/tm-linux-arm64":
 			w.Write([]byte("corrupted"))
-		case "/chr0nzz/traefik-stack/releases/download/v1.0.0/SHA256SUMS", "/chr0nzz/traefik-stack/releases/latest/download/SHA256SUMS":
+		case "/chr0nzz/tm-cli/releases/download/v1.0.0/SHA256SUMS", "/chr0nzz/tm-cli/releases/latest/download/SHA256SUMS":
 			w.Write([]byte(sums))
-		case "/chr0nzz/traefik-stack/releases/latest/download/tm-linux-amd64":
+		case "/chr0nzz/tm-cli/releases/latest/download/tm-linux-amd64":
 			w.Write(data)
 		default:
 			w.WriteHeader(http.StatusNotFound)

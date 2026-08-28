@@ -5,7 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/chr0nzz/traefik-stack/internal/ui"
+	"github.com/chr0nzz/tm-cli/internal/ui"
 )
 
 func init() { register(newDoctorCmd) }

@@ -5,7 +5,7 @@ import (
 
 	"charm.land/huh/v2"
 
-	"github.com/chr0nzz/traefik-stack/internal/answers"
+	"github.com/chr0nzz/tm-cli/internal/answers"
 )
 
 const (

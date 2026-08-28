@@ -11,11 +11,11 @@ import (
 	"charm.land/huh/v2"
 	"github.com/spf13/cobra"
 
-	"github.com/chr0nzz/traefik-stack/internal/answers"
-	"github.com/chr0nzz/traefik-stack/internal/host"
-	"github.com/chr0nzz/traefik-stack/internal/installer"
-	"github.com/chr0nzz/traefik-stack/internal/state"
-	"github.com/chr0nzz/traefik-stack/internal/ui"
+	"github.com/chr0nzz/tm-cli/internal/answers"
+	"github.com/chr0nzz/tm-cli/internal/host"
+	"github.com/chr0nzz/tm-cli/internal/installer"
+	"github.com/chr0nzz/tm-cli/internal/state"
+	"github.com/chr0nzz/tm-cli/internal/ui"
 )
 
 var allowUnverified bool

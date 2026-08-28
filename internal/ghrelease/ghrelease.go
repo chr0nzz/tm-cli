@@ -15,11 +15,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/chr0nzz/traefik-stack/internal/host"
+	"github.com/chr0nzz/tm-cli/internal/host"
 )
 
 const (
-	Repo      = "chr0nzz/traefik-stack"
+	Repo      = "chr0nzz/tm-cli"
 	AgentRepo = "chr0nzz/traefik-manager"
 	SumsFile  = "SHA256SUMS"
 )

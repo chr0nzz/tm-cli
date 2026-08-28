@@ -3,9 +3,9 @@ package installer
 import (
 	"fmt"
 
-	"github.com/chr0nzz/traefik-stack/internal/answers"
-	"github.com/chr0nzz/traefik-stack/internal/host"
-	"github.com/chr0nzz/traefik-stack/internal/ui"
+	"github.com/chr0nzz/tm-cli/internal/answers"
+	"github.com/chr0nzz/tm-cli/internal/host"
+	"github.com/chr0nzz/tm-cli/internal/ui"
 )
 
 func (in *Installer) Summary(a *answers.Answers) {

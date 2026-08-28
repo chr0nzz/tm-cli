@@ -1,4 +1,4 @@
-module github.com/chr0nzz/traefik-stack
+module github.com/chr0nzz/tm-cli
 
 go 1.27.0
 

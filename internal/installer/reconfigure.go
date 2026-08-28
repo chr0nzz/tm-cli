@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/chr0nzz/traefik-stack/internal/answers"
-	"github.com/chr0nzz/traefik-stack/internal/host"
-	"github.com/chr0nzz/traefik-stack/internal/render"
-	"github.com/chr0nzz/traefik-stack/internal/state"
+	"github.com/chr0nzz/tm-cli/internal/answers"
+	"github.com/chr0nzz/tm-cli/internal/host"
+	"github.com/chr0nzz/tm-cli/internal/render"
+	"github.com/chr0nzz/tm-cli/internal/state"
 )
 
 func (in *Installer) Reconfigure(ctx context.Context, st *state.State, edit func(a *answers.Answers) error) error {

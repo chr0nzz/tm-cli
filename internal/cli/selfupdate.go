@@ -6,9 +6,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/chr0nzz/traefik-stack/internal/ghrelease"
-	"github.com/chr0nzz/traefik-stack/internal/host"
-	"github.com/chr0nzz/traefik-stack/internal/ui"
+	"github.com/chr0nzz/tm-cli/internal/ghrelease"
+	"github.com/chr0nzz/tm-cli/internal/host"
+	"github.com/chr0nzz/tm-cli/internal/ui"
 )
 
 func init() { register(newSelfUpdateCmd) }

@@ -6,7 +6,7 @@ print_header() {
   echo "--------------------------------------------------" >&2
   echo "  Traefik Manager Installer" >&2
   echo "  --------------------------------------------------" >&2
-  echo "  Documentation: https://traefik-manager.xyzlab.dev/traefik-stack.html" >&2
+  echo "  Documentation: https://traefik-manager.xyzlab.dev/tm-cli" >&2
   echo "  Source Code:   https://github.com/chr0nzz/traefik-manager" >&2
   echo "" >&2
   echo "  Running this script will configure the service" >&2
@@ -99,7 +99,7 @@ run_tm() {
 }
 
 main() {
-  REPO="chr0nzz/traefik-stack"
+  REPO="chr0nzz/tm-cli"
   [ "$(uname -s)" = Linux ] || die "tm supports linux only"
   arch="$(detect_arch)" || die "unsupported architecture: $(uname -m)"
   version="$(resolve_version)"

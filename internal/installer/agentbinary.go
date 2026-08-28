@@ -4,11 +4,11 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/chr0nzz/traefik-stack/internal/answers"
-	"github.com/chr0nzz/traefik-stack/internal/ghrelease"
-	"github.com/chr0nzz/traefik-stack/internal/host"
-	"github.com/chr0nzz/traefik-stack/internal/render"
-	"github.com/chr0nzz/traefik-stack/internal/state"
+	"github.com/chr0nzz/tm-cli/internal/answers"
+	"github.com/chr0nzz/tm-cli/internal/ghrelease"
+	"github.com/chr0nzz/tm-cli/internal/host"
+	"github.com/chr0nzz/tm-cli/internal/render"
+	"github.com/chr0nzz/tm-cli/internal/state"
 )
 
 const agentUnit = "tma"
