@@ -195,17 +195,23 @@ func checkOutput(t *testing.T, a *answers.Answers, out *Output) {
 			t.Errorf("dir %s: absolute paths are for systemd modes only", d)
 		}
 	}
-	if a.Mode != answers.ModeTMDocker {
-		for _, k := range a.SecretKeys() {
-			if !referencesSecret(out, k) {
-				t.Errorf("secret %s is never referenced by the rendered files", k)
-			}
+	for _, k := range a.SecretKeys() {
+		if !referencesSecret(out, k) {
+			t.Errorf("secret %s is never referenced by the rendered files", k)
 		}
 	}
 }
 
 func isSecretFile(p string) bool {
-	return filepath.Base(p) == ".env" || p == AgentEnvPath
+	return filepath.Base(p) == ".env" || p == AgentEnvPath || p == NativeEnvPath
+}
+
+func isEnvFileUnit(p string) bool {
+	switch filepath.Base(p) {
+	case "tma.service", "traefik-manager.service", "traefik.service":
+		return true
+	}
+	return false
 }
 
 func referencesSecret(out *Output, key string) bool {
@@ -216,7 +222,7 @@ func referencesSecret(out *Output, key string) bool {
 		if strings.Contains(f.Content, "${"+key+"}") {
 			return true
 		}
-		if filepath.Base(f.Path) == "tma.service" && strings.Contains(f.Content, "EnvironmentFile=") {
+		if isEnvFileUnit(f.Path) && strings.Contains(f.Content, "EnvironmentFile=") {
 			return true
 		}
 	}

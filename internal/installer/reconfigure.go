@@ -34,7 +34,7 @@ func (in *Installer) Reconfigure(ctx context.Context, st *state.State, edit func
 	if st.Mode.IsDocker() && a.Dir != st.Dir {
 		return fmt.Errorf("the install directory cannot be changed with reconfigure (was %s, now %s)", st.Dir, a.Dir)
 	}
-	if st.Mode == answers.ModeTMNative && (a.Native.InstallDir != st.Answers.Native.InstallDir || a.Native.DataDir != st.Answers.Native.DataDir) {
+	if (st.Mode == answers.ModeTMNative || st.Mode == answers.ModeFullNative) && (a.Native.InstallDir != st.Answers.Native.InstallDir || a.Native.DataDir != st.Answers.Native.DataDir) {
 		return fmt.Errorf("native.install_dir and native.data_dir cannot be changed with reconfigure")
 	}
 	out, err := render.Render(render.Input{Answers: a, User: host.CurrentUser()})
@@ -94,6 +94,9 @@ func (in *Installer) Reconfigure(ctx context.Context, st *state.State, edit func
 			in.UI.Warn("keeping " + f.Path + " as is; run tm reconfigure again to apply the change later")
 		}
 	}
+	if err := in.installCrowdSecPackage(ctx, a); err != nil {
+		return err
+	}
 	in.UI.Step("Writing configuration")
 	for i := range out.Files {
 		if out.Files[i].Path == ".env" || strings.HasSuffix(out.Files[i].Path, "/env") {
@@ -124,6 +127,42 @@ func (in *Installer) Reconfigure(ctx context.Context, st *state.State, edit func
 		return err
 	}
 	switch st.Mode {
+	case answers.ModeFullNative:
+		if !host.UserExists(nativeUser) {
+			if err := host.AddSystemUser(ctx, nativeUser); err != nil {
+				return err
+			}
+		}
+		for _, dir := range []string{answers.NativeTraefikConfigDir, answers.NativeTraefikStateDir, answers.NativeTraefikLogDir} {
+			if err := host.Chown(dir, nativeUser+":", true); err != nil {
+				return err
+			}
+		}
+		if a.Mounts.StaticConfig {
+			_ = host.MkdirAll(filepath.Dir(a.Restart.SignalFile), 0o755)
+			_ = host.Chown(filepath.Dir(a.Restart.SignalFile), nativeUser+":", true)
+		}
+		if err := host.Systemctl(ctx, "daemon-reload"); err != nil {
+			return err
+		}
+		if a.Mounts.StaticConfig {
+			if err := host.Systemctl(ctx, "enable", "--now", restartPathUnit); err != nil {
+				return err
+			}
+		} else if prev.Mounts.StaticConfig {
+			_ = host.Systemctl(ctx, "disable", "--now", restartPathUnit)
+			_ = host.Remove("/etc/systemd/system/"+restartPathUnit, false)
+			_ = host.Remove("/etc/systemd/system/traefik-restart.service", false)
+		}
+		in.registerCrowdSecNative(ctx, a)
+		in.reloadCrowdSec(ctx, a)
+		if err := host.Systemctl(ctx, "restart", traefikUnit); err != nil {
+			return err
+		}
+		if err := host.Systemctl(ctx, "restart", nativeUnit); err != nil {
+			return err
+		}
+		in.UI.OK("traefik and traefik-manager restarted")
 	case answers.ModeTMNative:
 		if a.Native.ServiceUser && !host.UserExists(nativeUser) {
 			if err := host.AddSystemUser(ctx, nativeUser); err != nil {
@@ -148,6 +187,8 @@ func (in *Installer) Reconfigure(ctx context.Context, st *state.State, edit func
 			_ = host.Remove("/etc/systemd/system/"+restartPathUnit, false)
 			_ = host.Remove("/etc/systemd/system/traefik-restart.service", false)
 		}
+		in.registerCrowdSecNative(ctx, a)
+		in.reloadCrowdSec(ctx, a)
 		if err := host.Systemctl(ctx, "restart", nativeUnit); err != nil {
 			return err
 		}
@@ -156,6 +197,8 @@ func (in *Installer) Reconfigure(ctx context.Context, st *state.State, edit func
 		if err := host.Systemctl(ctx, "daemon-reload"); err != nil {
 			return err
 		}
+		in.registerCrowdSecNative(ctx, a)
+		in.reloadCrowdSec(ctx, a)
 		if err := host.Systemctl(ctx, "restart", agentUnit); err != nil {
 			return err
 		}
@@ -170,7 +213,7 @@ func (in *Installer) Reconfigure(ctx context.Context, st *state.State, edit func
 			return err
 		}
 		in.UI.OK("services updated")
-		if a.Mode == answers.ModeFull && a.CrowdSec.Mode == answers.CrowdSecInstall && prev.CrowdSec.Mode != answers.CrowdSecInstall && a.CrowdSec.MachineID != "" {
+		if !a.Mode.IsAgent() && a.CrowdSec.Mode == answers.CrowdSecInstall && prev.CrowdSec.Mode != answers.CrowdSecInstall && a.CrowdSec.MachineID != "" {
 			in.registerCrowdSecMachine(ctx, a.CrowdSec.MachineID, a.Secrets[answers.SecretCrowdSecMachinePassword])
 		}
 	}
@@ -271,8 +314,8 @@ func (in *Installer) ExistingSecrets(st *state.State) map[string]string {
 	switch st.Mode {
 	case answers.ModeAgentBinary:
 		mergeEnvFile(secrets, "/etc/traefik-manager-agent/env", keys)
-	case answers.ModeTMNative:
-		return secrets
+	case answers.ModeFullNative, answers.ModeTMNative:
+		mergeEnvFile(secrets, render.NativeEnvPath, keys)
 	default:
 		mergeEnvFile(secrets, filepath.Join(st.Dir, ".env"), nil)
 	}

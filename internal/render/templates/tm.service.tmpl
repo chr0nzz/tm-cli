@@ -6,6 +6,9 @@ After=network.target
 Type=simple
 User={{ .User }}
 WorkingDirectory={{ .InstallDir }}
+{{- if .EnvFile }}
+EnvironmentFile={{ .EnvFile }}
+{{- end }}
 Environment={{ .HomeEnv }}
 ExecStart={{ .ExecStartArg }} \
     --bind 0.0.0.0:{{ .Port }} \

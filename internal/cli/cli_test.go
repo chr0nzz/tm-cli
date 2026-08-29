@@ -146,3 +146,22 @@ func TestPasswordResetFlagConflict(t *testing.T) {
 		t.Fatalf("expected a flag conflict error, got %v", err)
 	}
 }
+
+func TestUninstallSelfNeedsYesWhenNonInteractive(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("TM_REGISTRY", filepath.Join(dir, "installs.yml"))
+	_, err := run(t, "uninstall", "--self")
+	if err == nil || !strings.Contains(err.Error(), "--yes") {
+		t.Fatalf("expected a refusal naming --yes, got %v", err)
+	}
+}
+
+func TestUninstallWithoutAnInstallMentionsSelf(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("TM_REGISTRY", filepath.Join(dir, "installs.yml"))
+	t.Setenv("TM_DIR", "")
+	_, err := run(t, "uninstall")
+	if err == nil || !strings.Contains(err.Error(), "--self") {
+		t.Fatalf("the not-found error must point at --self, got %v", err)
+	}
+}

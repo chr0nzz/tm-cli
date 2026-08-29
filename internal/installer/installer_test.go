@@ -188,3 +188,116 @@ func TestExternalFacing(t *testing.T) {
 		t.Fatal("an http challenge implies the host is reachable from the internet")
 	}
 }
+
+func TestFullNativeURLsAndAcmePath(t *testing.T) {
+	a := answers.Defaults(answers.ModeFullNative)
+	a.Domain = "example.com"
+	a.TLS.Email = "a@example.com"
+	a.Finalize()
+	st := state.New(a, "test", "")
+	in := &Installer{}
+	urls := in.URLs(st)
+	if len(urls) != 2 || urls[0][0] != "Traefik dashboard" || urls[0][1] != "https://traefik.example.com" {
+		t.Fatalf("urls = %v", urls)
+	}
+	if urls[1][0] != "Traefik Manager" || !strings.HasPrefix(urls[1][1], "http://") || !strings.HasSuffix(urls[1][1], ":5000") {
+		t.Fatalf("tm url = %v", urls[1])
+	}
+	if got := acmePath(st); got != answers.NativeAcmePath {
+		t.Fatalf("acme path = %q", got)
+	}
+	b := answers.Defaults(answers.ModeFullNative)
+	b.TLS = answers.TLS{Method: answers.TLSNone}
+	b.Finalize()
+	st2 := state.New(b, "test", "")
+	if urls := in.URLs(st2); len(urls) != 1 || urls[0][0] != "Traefik Manager" {
+		t.Fatalf("urls without a dashboard host = %v", urls)
+	}
+	if got := acmePath(st2); got != "" {
+		t.Fatalf("no acme path expected without tls, got %q", got)
+	}
+}
+
+func TestStaticDeclaresPlugins(t *testing.T) {
+	dir := t.TempDir()
+	with := filepath.Join(dir, "with.yml")
+	without := filepath.Join(dir, "without.yml")
+	if err := os.WriteFile(with, []byte("experimental:\n  plugins:\n    crowdsec:\n      moduleName: x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(without, []byte("api:\n  dashboard: true\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !staticDeclaresPlugins(with) {
+		t.Fatal("declared plugins not detected")
+	}
+	if staticDeclaresPlugins(without) {
+		t.Fatal("false positive without plugins")
+	}
+	if staticDeclaresPlugins(filepath.Join(dir, "missing.yml")) {
+		t.Fatal("a missing file declares nothing")
+	}
+}
+
+func TestCscliCommandsCarryTheSuppliedCredentials(t *testing.T) {
+	bouncer := cscliBouncerAddArgs("traefik-manager", "bouncer-key")
+	if strings.Join(bouncer, " ") != "cscli bouncers add traefik-manager --key bouncer-key" {
+		t.Errorf("bouncer add: %v", bouncer)
+	}
+	del := cscliBouncerDeleteArgs("traefik-manager")
+	if strings.Join(del, " ") != "cscli bouncers delete traefik-manager" {
+		t.Errorf("bouncer delete: %v", del)
+	}
+	machine := cscliMachineAddArgs("traefik-manager", "machine-pw")
+	if strings.Join(machine, " ") != "cscli machines add traefik-manager --password machine-pw --force" {
+		t.Errorf("machine add: %v", machine)
+	}
+	if strings.Join(cscliCollectionArgs("crowdsecurity/traefik"), " ") != "cscli collections install crowdsecurity/traefik" {
+		t.Errorf("collection: %v", cscliCollectionArgs("crowdsecurity/traefik"))
+	}
+}
+
+func TestCrowdSecBouncerNamePerMode(t *testing.T) {
+	cases := map[answers.Mode]string{
+		answers.ModeFullNative:  "traefik-manager",
+		answers.ModeTMNative:    "traefik-manager",
+		answers.ModeAgentBinary: "tma",
+	}
+	for mode, want := range cases {
+		if got := crowdsecBouncerName(mode); got != want {
+			t.Errorf("%s bouncer name %q, want %q", mode, got, want)
+		}
+	}
+}
+
+func TestNativeCrowdSecNeeded(t *testing.T) {
+	cases := []struct {
+		mode answers.Mode
+		csm  string
+		want bool
+	}{
+		{answers.ModeTMNative, answers.CrowdSecInstall, true},
+		{answers.ModeFullNative, answers.CrowdSecInstall, true},
+		{answers.ModeAgentBinary, answers.CrowdSecInstall, true},
+		{answers.ModeTMNative, answers.CrowdSecConnect, false},
+		{answers.ModeTMNative, answers.CrowdSecNone, false},
+		{answers.ModeTMDocker, answers.CrowdSecInstall, false},
+		{answers.ModeFull, answers.CrowdSecInstall, false},
+	}
+	for _, c := range cases {
+		a := answers.Defaults(c.mode)
+		a.CrowdSec.Mode = c.csm
+		if got := nativeCrowdSecNeeded(a); got != c.want {
+			t.Errorf("%s/%s = %v, want %v", c.mode, c.csm, got, c.want)
+		}
+	}
+}
+
+func TestServiceNamesIncludeCrowdSec(t *testing.T) {
+	a := answers.Defaults(answers.ModeTMDocker)
+	a.CrowdSec.Mode = answers.CrowdSecInstall
+	a.Finalize()
+	if got := strings.Join(serviceNames(a), ","); got != "traefik-manager,crowdsec" {
+		t.Errorf("tm-docker services: %s", got)
+	}
+}

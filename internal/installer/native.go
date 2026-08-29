@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"github.com/chr0nzz/tm-cli/internal/answers"
 	"github.com/chr0nzz/tm-cli/internal/host"
@@ -18,8 +19,7 @@ const (
 	restartPathUnit = "traefik-restart.path"
 )
 
-func (in *Installer) installNative(ctx context.Context, a *answers.Answers, out *render.Output, st *state.State) error {
-	in.UI.Step("Installing Traefik Manager")
+func (in *Installer) cloneOrPullNative(ctx context.Context, a *answers.Answers) error {
 	dir := a.Native.InstallDir
 	if host.IsDir(dir) {
 		in.UI.Warn(dir + " already exists. Pulling latest changes.")
@@ -42,6 +42,27 @@ func (in *Installer) installNative(ctx context.Context, a *answers.Answers, out 
 		}
 	}
 	in.UI.OK("Repository cloned to " + dir)
+	return nil
+}
+
+func (in *Installer) ensureNativeUser(ctx context.Context) error {
+	if host.UserExists(nativeUser) {
+		in.UI.OK("System user " + nativeUser + " already exists")
+		return nil
+	}
+	if err := host.AddSystemUser(ctx, nativeUser); err != nil {
+		return err
+	}
+	in.UI.OK("System user " + nativeUser + " created")
+	return nil
+}
+
+func (in *Installer) installNative(ctx context.Context, a *answers.Answers, out *render.Output, st *state.State) error {
+	in.UI.Step("Installing Traefik Manager")
+	dir := a.Native.InstallDir
+	if err := in.cloneOrPullNative(ctx, a); err != nil {
+		return err
+	}
 	if err := in.buildNativeVenv(ctx, dir); err != nil {
 		return err
 	}
@@ -56,14 +77,12 @@ func (in *Installer) installNative(ctx context.Context, a *answers.Answers, out 
 		}
 		in.UI.OK("Signal directory created at " + signalDir)
 	}
+	if err := in.installCrowdSecPackage(ctx, a); err != nil {
+		return err
+	}
 	if a.Native.ServiceUser {
-		if host.UserExists(nativeUser) {
-			in.UI.OK("System user " + nativeUser + " already exists")
-		} else {
-			if err := host.AddSystemUser(ctx, nativeUser); err != nil {
-				return err
-			}
-			in.UI.OK("System user " + nativeUser + " created")
+		if err := in.ensureNativeUser(ctx); err != nil {
+			return err
 		}
 		if err := host.Chown(dir, nativeUser+":", true); err != nil {
 			return err
@@ -85,6 +104,8 @@ func (in *Installer) installNative(ctx context.Context, a *answers.Answers, out 
 	if err := in.writeOutput(a, out, st, nil); err != nil {
 		return err
 	}
+	in.registerCrowdSecNative(ctx, a)
+	in.reloadCrowdSec(ctx, a)
 	if err := host.Systemctl(ctx, "daemon-reload"); err != nil {
 		return err
 	}
@@ -127,14 +148,28 @@ func (in *Installer) updateNative(ctx context.Context, a *answers.Answers) error
 	}
 	home := "HOME=" + dir
 	branch := a.GitBranch()
-	steps := [][]string{
+	before := in.gitHead(ctx, owner, home, dir)
+	pull := [][]string{
 		{"env", home, "git", "-C", dir, "fetch", "origin", branch},
 		{"env", home, "git", "-C", dir, "checkout", branch},
 		{"env", home, "git", "-C", dir, "pull"},
+	}
+	for _, step := range pull {
+		if err := host.Run(host.RunAs(ctx, owner, step[0], step[1:]...)); err != nil {
+			return err
+		}
+	}
+	after := in.gitHead(ctx, owner, home, dir)
+	if !in.Force && before != "" && before == after {
+		in.UI.OK("Traefik Manager is already up to date, nothing to rebuild")
+		in.UI.Info("run tm update --force to reinstall the dependencies and rebuild the assets anyway")
+		return nil
+	}
+	build := [][]string{
 		{"env", home, filepath.Join(dir, "venv", "bin", "pip"), "install", "-q", "--no-cache-dir", "-r", filepath.Join(dir, "requirements.txt"), "gunicorn"},
 		{"env", home, "bash", filepath.Join(dir, "scripts", "setup-assets.sh")},
 	}
-	for _, step := range steps {
+	for _, step := range build {
 		if err := host.Run(host.RunAs(ctx, owner, step[0], step[1:]...)); err != nil {
 			return err
 		}
@@ -149,4 +184,12 @@ func (in *Installer) updateNative(ctx context.Context, a *answers.Answers) error
 	}
 	in.UI.OK("Traefik Manager updated and restarted")
 	return nil
+}
+
+func (in *Installer) gitHead(ctx context.Context, owner, home, dir string) string {
+	out, err := host.Output(host.RunAs(ctx, owner, "env", home, "git", "-C", dir, "rev-parse", "HEAD"))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(out)
 }

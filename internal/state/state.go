@@ -40,22 +40,23 @@ var (
 )
 
 type State struct {
-	Version     int               `yaml:"version"`
-	Mode        answers.Mode      `yaml:"mode"`
-	TMVersion   string            `yaml:"tm_version"`
-	InstalledAt time.Time         `yaml:"installed_at"`
-	UpdatedAt   time.Time         `yaml:"updated_at"`
-	Adopted     bool              `yaml:"adopted"`
-	ComposeCmd  string            `yaml:"compose_cmd"`
-	Dir         string            `yaml:"dir"`
-	OwnedFiles  map[string]string `yaml:"owned_files"`
-	Answers     answers.Answers   `yaml:"answers"`
-	Path        string            `yaml:"-"`
+	Version        int               `yaml:"version"`
+	Mode           answers.Mode      `yaml:"mode"`
+	TMVersion      string            `yaml:"tm_version"`
+	TraefikVersion string            `yaml:"traefik_version,omitempty"`
+	InstalledAt    time.Time         `yaml:"installed_at"`
+	UpdatedAt      time.Time         `yaml:"updated_at"`
+	Adopted        bool              `yaml:"adopted"`
+	ComposeCmd     string            `yaml:"compose_cmd"`
+	Dir            string            `yaml:"dir"`
+	OwnedFiles     map[string]string `yaml:"owned_files"`
+	Answers        answers.Answers   `yaml:"answers"`
+	Path           string            `yaml:"-"`
 }
 
 func PathFor(a *answers.Answers) string {
 	switch a.Mode {
-	case answers.ModeTMNative:
+	case answers.ModeTMNative, answers.ModeFullNative:
 		return nativeStatePath
 	case answers.ModeAgentBinary:
 		return agentBinaryStatePath
@@ -64,7 +65,7 @@ func PathFor(a *answers.Answers) string {
 }
 
 func dirOf(a *answers.Answers) string {
-	if a.Dir == "" && a.Mode == answers.ModeTMNative {
+	if a.Dir == "" && (a.Mode == answers.ModeTMNative || a.Mode == answers.ModeFullNative) {
 		return a.Native.InstallDir
 	}
 	return a.Dir

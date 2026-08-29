@@ -25,6 +25,8 @@ func reviewValue(a *answers.Answers, id string) string {
 	switch a.Mode {
 	case answers.ModeFull:
 		return fullValue(a, id)
+	case answers.ModeFullNative:
+		return fnoValue(a, id)
 	case answers.ModeTMDocker:
 		return tmdValue(a, id)
 	case answers.ModeTMNative:
@@ -33,15 +35,53 @@ func reviewValue(a *answers.Answers, id string) string {
 	return agentValue(a, id)
 }
 
+func deploymentValue(a *answers.Answers) string {
+	if a.Deployment == answers.DeploymentExternal {
+		return "external (internet-facing)"
+	}
+	return "internal (LAN / VPN)"
+}
+
+func fnoValue(a *answers.Answers, id string) string {
+	switch id {
+	case "general":
+		return fmt.Sprintf("%s  data:%s  tm::%s  api::%s", a.Native.InstallDir, a.Native.DataDir, a.Native.Port, a.Network.TraefikAPIPort)
+	case "deployment":
+		return deploymentValue(a)
+	case "domain":
+		if a.Domain == "" {
+			v := "(no dashboard route)"
+			if !a.Dashboard {
+				v += "  dashboard:off"
+			}
+			return v
+		}
+		v := a.Domain + "  dash:" + a.Hosts.Dashboard
+		if !a.Dashboard {
+			v += "  dashboard:off"
+		}
+		return v
+	case "tls":
+		return tlsValue(a)
+	case "config":
+		return layoutValue(a)
+	case "mounts":
+		if !a.Mounts.StaticConfig {
+			return "static editor off"
+		}
+		return "static editor on (restart:" + a.Restart.Method + ")"
+	case "crowdsec":
+		return crowdsecValue(a)
+	}
+	return ""
+}
+
 func fullValue(a *answers.Answers, id string) string {
 	switch id {
 	case "general":
 		return a.Dir
 	case "deployment":
-		if a.Deployment == answers.DeploymentExternal {
-			return "external (internet-facing)"
-		}
-		return "internal (LAN / VPN)"
+		return deploymentValue(a)
 	case "domain":
 		v := fmt.Sprintf("%s  dash:%s  tm:%s", a.Domain, a.Hosts.Dashboard, a.Hosts.Manager)
 		if !a.Dashboard {
@@ -87,6 +127,8 @@ func tmdValue(a *answers.Answers, id string) string {
 		return layoutValue(a)
 	case "mounts":
 		return mountsValue(a, "logs", "certs")
+	case "crowdsec":
+		return crowdsecValue(a)
 	}
 	return ""
 }
@@ -107,6 +149,8 @@ func tmnValue(a *answers.Answers, id string) string {
 		return "Single file  " + a.Config.Path
 	case "mounts":
 		return mountsValue(a, "certs", "logs")
+	case "crowdsec":
+		return crowdsecValue(a)
 	}
 	return ""
 }
@@ -224,6 +268,9 @@ func mountsValue(a *answers.Answers, order ...string) string {
 func crowdsecValue(a *answers.Answers) string {
 	switch a.CrowdSec.Mode {
 	case answers.CrowdSecInstall:
+		if a.Mode.IsSystemd() {
+			return "install (CrowdSec package)"
+		}
 		return "install alongside"
 	case answers.CrowdSecConnect:
 		return "connect  " + a.CrowdSec.LAPIURL

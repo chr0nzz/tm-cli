@@ -14,16 +14,22 @@ entryPoints:
   websecure:
     address: ":443"
 {{- end }}
+{{- if .APIAddress }}
+  traefik:
+    address: "{{ .APIAddress }}"
+{{- end }}
 
 providers:
+{{- if .Network }}
   docker:
     exposedByDefault: false
     network: {{ .Network }}
+{{- end }}
   file:
 {{- if .SingleFile }}
-    filename: /etc/traefik/config/dynamic.yml
+    filename: {{ .DynamicFile }}
 {{- else }}
-    directory: /etc/traefik/config
+    directory: {{ .DynamicDir }}
 {{- end }}
     watch: true
 {{- if .TLS }}
@@ -32,7 +38,7 @@ certificatesResolvers:
   {{ .Resolver }}:
     acme:
       email: {{ .Email }}
-      storage: /acme.json
+      storage: {{ .AcmeStorage }}
 {{- if .DNS }}
       dnsChallenge:
         provider: {{ .Provider }}
@@ -44,10 +50,14 @@ certificatesResolvers:
         entryPoint: web
 {{- end }}
 {{- end }}
+{{- if .Ping }}
+
+ping: {}
+{{- end }}
 
 log:
   level: INFO
 
 accessLog:
-  filePath: /logs/access.log
+  filePath: {{ .AccessLog }}
   bufferingSize: 100

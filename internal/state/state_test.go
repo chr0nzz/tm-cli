@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/chr0nzz/tm-cli/internal/answers"
 )
 
@@ -242,6 +244,40 @@ func TestPathFor(t *testing.T) {
 	}
 	if got := PathFor(&answers.Answers{Mode: answers.ModeAgentBinary}); got != "/etc/traefik-manager-agent/tm-state.yml" {
 		t.Fatalf("agent binary path wrong: %s", got)
+	}
+	if got := PathFor(&answers.Answers{Mode: answers.ModeFullNative}); got != "/etc/traefik-manager/tm-state.yml" {
+		t.Fatalf("full-native path wrong: %s", got)
+	}
+}
+
+func TestTraefikVersionRoundTrip(t *testing.T) {
+	isolate(t)
+	defer func(p string) { nativeStatePath = p }(nativeStatePath)
+	nativeStatePath = filepath.Join(t.TempDir(), "etc", "traefik-manager", "tm-state.yml")
+	a := answers.Defaults(answers.ModeFullNative)
+	a.TLS = answers.TLS{Method: answers.TLSNone}
+	a.Finalize()
+	st := New(a, "1.13.0", "")
+	if st.Dir != a.Native.InstallDir {
+		t.Fatalf("full-native state dir wrong: %s", st.Dir)
+	}
+	data, err := yaml.Marshal(st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "traefik_version") {
+		t.Fatal("an empty traefik version must be omitted so existing state files round-trip untouched")
+	}
+	st.TraefikVersion = "v3.7.12"
+	if err := st.Save(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load(st.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.TraefikVersion != "v3.7.12" || got.Mode != answers.ModeFullNative {
+		t.Fatalf("traefik version lost: %+v", got)
 	}
 }
 

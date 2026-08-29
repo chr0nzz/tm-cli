@@ -53,11 +53,14 @@ func (in *Installer) Status(ctx context.Context, st *state.State) error {
 	u.KV("Mode", string(st.Mode))
 	if st.Mode.IsDocker() {
 		u.KV("Directory", st.Dir)
-	} else if st.Mode == answers.ModeTMNative {
+	} else if st.Mode == answers.ModeTMNative || st.Mode == answers.ModeFullNative {
 		u.KV("Directory", a.Native.InstallDir)
 		u.KV("Data dir", a.Native.DataDir)
 	} else {
 		u.KV("Binary", answers.AgentBinaryPath)
+	}
+	if st.TraefikVersion != "" {
+		u.KV("Traefik", st.TraefikVersion)
 	}
 	if st.Adopted {
 		u.KV("Installed by", "adopted from an existing install")
@@ -112,6 +115,12 @@ func (in *Installer) Services(ctx context.Context, st *state.State) []ServiceSta
 	a := &st.Answers
 	var out []ServiceStatus
 	switch st.Mode {
+	case answers.ModeFullNative:
+		out = append(out, ServiceStatus{Name: traefikUnit + ".service", Status: unitStatus(ctx, traefikUnit)})
+		out = append(out, ServiceStatus{Name: nativeUnit + ".service", Status: unitStatus(ctx, nativeUnit)})
+		if a.Mounts.StaticConfig {
+			out = append(out, ServiceStatus{Name: restartPathUnit, Status: unitStatus(ctx, restartPathUnit)})
+		}
 	case answers.ModeTMNative:
 		out = append(out, ServiceStatus{Name: nativeUnit + ".service", Status: unitStatus(ctx, nativeUnit)})
 		if a.Mounts.StaticConfig && a.Restart.TraefikSystemd {
@@ -124,6 +133,9 @@ func (in *Installer) Services(ctx context.Context, st *state.State) []ServiceSta
 			status, image := containerStatus(ctx, name)
 			out = append(out, ServiceStatus{Name: name, Status: status, Image: image})
 		}
+	}
+	if st.Mode.IsSystemd() && a.CrowdSec.Mode == answers.CrowdSecInstall {
+		out = append(out, ServiceStatus{Name: crowdsecUnit + ".service", Status: unitStatus(ctx, crowdsecUnit)})
 	}
 	return out
 }
@@ -149,6 +161,12 @@ func (in *Installer) URLs(st *state.State) [][2]string {
 			{"Traefik dashboard", a.Scheme() + "://" + a.Hosts.Dashboard},
 			{"Traefik Manager", a.Scheme() + "://" + a.Hosts.Manager},
 		}
+	case answers.ModeFullNative:
+		var urls [][2]string
+		if a.Hosts.Dashboard != "" {
+			urls = append(urls, [2]string{"Traefik dashboard", a.Scheme() + "://" + a.Hosts.Dashboard})
+		}
+		return append(urls, [2]string{"Traefik Manager", "http://" + ip + ":" + a.Native.Port})
 	case answers.ModeTMDocker:
 		if a.Access.ViaTraefik {
 			return [][2]string{{"Traefik Manager", a.Scheme() + "://" + a.Hosts.Manager}}
@@ -185,7 +203,7 @@ func (in *Installer) CheckHealth(ctx context.Context, st *state.State) Health {
 		} else {
 			url = "http://127.0.0.1:" + a.Access.Port
 		}
-	case answers.ModeTMNative:
+	case answers.ModeTMNative, answers.ModeFullNative:
 		url = "http://127.0.0.1:" + a.Native.Port
 	default:
 		url = "http://127.0.0.1:" + a.Agent.Port
@@ -294,6 +312,10 @@ func (in *Installer) Update(ctx context.Context, st *state.State) error {
 		return err
 	}
 	switch st.Mode {
+	case answers.ModeFullNative:
+		if err := in.updateFullNative(ctx, st); err != nil {
+			return err
+		}
 	case answers.ModeTMNative:
 		if err := in.updateNative(ctx, &st.Answers); err != nil {
 			return err
@@ -322,7 +344,7 @@ func (in *Installer) Logs(ctx context.Context, st *state.State, service string, 
 		return err
 	}
 	switch st.Mode {
-	case answers.ModeTMNative, answers.ModeAgentBinary:
+	case answers.ModeTMNative, answers.ModeAgentBinary, answers.ModeFullNative:
 		unit := nativeUnit
 		if st.Mode == answers.ModeAgentBinary {
 			unit = agentUnit
@@ -352,18 +374,23 @@ func (in *Installer) Control(ctx context.Context, st *state.State, action, servi
 		return err
 	}
 	switch st.Mode {
-	case answers.ModeTMNative, answers.ModeAgentBinary:
-		unit := nativeUnit
+	case answers.ModeTMNative, answers.ModeAgentBinary, answers.ModeFullNative:
+		units := []string{nativeUnit}
 		if st.Mode == answers.ModeAgentBinary {
-			unit = agentUnit
+			units = []string{agentUnit}
+		}
+		if st.Mode == answers.ModeFullNative {
+			units = []string{traefikUnit, nativeUnit}
 		}
 		if service != "" {
-			unit = service
+			units = []string{service}
 		}
-		if err := host.Systemctl(ctx, action, unit); err != nil {
-			return err
+		for _, unit := range units {
+			if err := host.Systemctl(ctx, action, unit); err != nil {
+				return err
+			}
+			in.UI.OK(unit + " " + pastTense(action))
 		}
-		in.UI.OK(unit + " " + pastTense(action))
 		return nil
 	default:
 		args := []string{action}
@@ -405,7 +432,7 @@ func (in *Installer) Password(ctx context.Context, st *state.State) (string, err
 	}
 	var logs string
 	switch st.Mode {
-	case answers.ModeTMNative:
+	case answers.ModeTMNative, answers.ModeFullNative:
 		out, err := host.Journalctl(ctx, nativeUnit, 2000)
 		if err != nil {
 			return "", err
@@ -444,6 +471,49 @@ func (in *Installer) Uninstall(ctx context.Context, st *state.State, opts Uninst
 	}
 	a := &st.Answers
 	switch st.Mode {
+	case answers.ModeFullNative:
+		in.UI.Step("Stopping services")
+		_ = host.Systemctl(ctx, "disable", "--now", nativeUnit)
+		if host.Exists("/etc/systemd/system/" + restartPathUnit) {
+			_ = host.Systemctl(ctx, "disable", "--now", restartPathUnit)
+			_ = host.Remove("/etc/systemd/system/"+restartPathUnit, false)
+			_ = host.Remove("/etc/systemd/system/traefik-restart.service", false)
+		}
+		_ = host.Systemctl(ctx, "disable", "--now", traefikUnit)
+		if err := host.Remove(render.NativeUnitPath, false); err != nil {
+			return err
+		}
+		if err := host.Remove(render.TraefikUnitPath, false); err != nil {
+			return err
+		}
+		_ = host.Systemctl(ctx, "daemon-reload")
+		in.UI.OK("systemd units removed")
+		_ = host.Remove(answers.TraefikBinaryPath, false)
+		_ = host.Remove(answers.TraefikBinaryPath+".prev", false)
+		in.UI.OK(answers.TraefikBinaryPath + " removed")
+		_ = host.Remove(render.LogrotatePath, false)
+		if err := host.Remove(a.Native.InstallDir, true); err != nil {
+			return err
+		}
+		in.UI.OK(a.Native.InstallDir + " removed")
+		if opts.Purge {
+			for _, p := range []string{a.Native.DataDir, answers.NativeTraefikConfigDir, answers.NativeTraefikStateDir, answers.NativeTraefikLogDir} {
+				if err := host.Remove(p, true); err != nil {
+					return err
+				}
+				in.UI.OK(p + " removed")
+			}
+			if a.Native.ServiceUser && host.UserExists(nativeUser) {
+				if err := host.Run(host.Privileged(ctx, "userdel", nativeUser)); err != nil {
+					in.UI.Warn("could not remove user " + nativeUser + ": " + err.Error())
+				} else {
+					in.UI.OK("user " + nativeUser + " removed")
+				}
+			}
+		} else {
+			in.UI.Info("kept " + answers.NativeTraefikConfigDir + " (your routing config), " + answers.NativeTraefikStateDir + " (certificates) and " + answers.NativeTraefikLogDir + " (logs)")
+			in.UI.Info("data kept in " + a.Native.DataDir + " (use --purge to remove all of it)")
+		}
 	case answers.ModeTMNative:
 		in.UI.Step("Stopping services")
 		_ = host.Systemctl(ctx, "disable", "--now", nativeUnit)
@@ -506,8 +576,12 @@ func (in *Installer) Uninstall(ctx context.Context, st *state.State, opts Uninst
 			in.UI.Info("configs, backups, certificates and logs kept in " + st.Dir + " (use --purge to remove everything)")
 		}
 	}
+	if st.Mode.IsSystemd() && a.CrowdSec.Mode == answers.CrowdSecInstall {
+		_ = host.Remove(render.CrowdSecAcquisPath, false)
+		in.UI.Info("the crowdsec package is left installed, its Traefik acquisition file is removed")
+	}
 	_ = host.Remove(st.Path, false)
-	if st.Mode.IsDocker() || st.Mode == answers.ModeTMNative {
+	if st.Mode.IsDocker() || st.Mode == answers.ModeTMNative || st.Mode == answers.ModeFullNative {
 		_ = host.Remove(filepath.Dir(st.Path), true)
 	}
 	_ = state.Unregister(st.Path)

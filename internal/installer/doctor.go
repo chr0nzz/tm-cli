@@ -6,12 +6,16 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/user"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/chr0nzz/tm-cli/internal/answers"
 	"github.com/chr0nzz/tm-cli/internal/host"
+	"github.com/chr0nzz/tm-cli/internal/render"
 	"github.com/chr0nzz/tm-cli/internal/state"
 	"github.com/chr0nzz/tm-cli/internal/ui"
 )
@@ -30,7 +34,12 @@ func (in *Installer) Doctor(ctx context.Context, st *state.State) (failed int, e
 	checks := in.checks(st)
 	for _, c := range checks {
 		ok, detail := c.Run(ctx)
-		label := fmt.Sprintf("%-42s", c.Name)
+		label := c.Name
+		if len(label) < 42 {
+			label = label + strings.Repeat(" ", 42-len(label))
+		} else {
+			label += "  "
+		}
 		switch {
 		case ok:
 			in.UI.OK(label + ui.MutedStyle.Render(detail))
@@ -91,7 +100,7 @@ func (in *Installer) checks(st *state.State) []Check {
 			}},
 		)
 	}
-	if st.Mode == answers.ModeTMNative {
+	if st.Mode == answers.ModeTMNative || st.Mode == answers.ModeFullNative {
 		checks = append(checks,
 			Check{Name: "python >= 3.11", Run: func(ctx context.Context) (bool, string) {
 				v, ok := host.PythonVersion()
@@ -119,13 +128,23 @@ func (in *Installer) checks(st *state.State) []Check {
 		}, Advice: "tm update"})
 	}
 	if st.Mode.IsSystemd() {
-		unit := nativeUnit
+		units := []string{nativeUnit}
 		if st.Mode == answers.ModeAgentBinary {
-			unit = agentUnit
+			units = []string{agentUnit}
 		}
-		checks = append(checks, Check{Name: unit + ".service active", Run: func(ctx context.Context) (bool, string) {
-			return host.ServiceActive(ctx, unit), unitStatus(ctx, unit)
-		}, Advice: "tm logs"})
+		if st.Mode == answers.ModeFullNative {
+			units = []string{traefikUnit, nativeUnit}
+		}
+		for _, unit := range units {
+			unit := unit
+			advice := "tm logs"
+			if len(units) > 1 {
+				advice = "tm logs " + unit
+			}
+			checks = append(checks, Check{Name: unit + ".service active", Run: func(ctx context.Context) (bool, string) {
+				return host.ServiceActive(ctx, unit), unitStatus(ctx, unit)
+			}, Advice: advice})
+		}
 	} else {
 		for _, name := range serviceNames(a) {
 			name := name
@@ -152,6 +171,22 @@ func (in *Installer) checks(st *state.State) []Check {
 			return true, h.URL
 		}, Advice: "tm logs traefik"})
 	}
+	if st.Mode == answers.ModeFullNative {
+		checks = append(checks,
+			Check{Name: "plugins-storage is writable", Soft: true, Run: func(ctx context.Context) (bool, string) {
+				if !staticDeclaresPlugins(a.Mounts.StaticConfigPath) {
+					return true, "no plugins declared"
+				}
+				return dirWritableBy(pluginsStorageDir, nativeUser)
+			}, Advice: "sudo chown -R " + nativeUser + ": " + pluginsStorageDir},
+			Check{Name: "logrotate drop-in present", Soft: true, Run: func(ctx context.Context) (bool, string) {
+				if !host.Exists(render.LogrotatePath) {
+					return false, render.LogrotatePath + " missing, the access log grows forever"
+				}
+				return true, render.LogrotatePath
+			}, Advice: "tm reconfigure"},
+		)
+	}
 	if externalFacing(a) {
 		for _, h := range []string{a.Hosts.Dashboard, a.Hosts.Manager, a.Hosts.Agent} {
 			if h == "" {
@@ -177,7 +212,7 @@ func (in *Installer) checks(st *state.State) []Check {
 	}
 	if a.Mounts.StaticConfig && a.Restart.Method == answers.RestartPoisonPill {
 		switch {
-		case st.Mode == answers.ModeTMNative && a.Restart.TraefikSystemd:
+		case (st.Mode == answers.ModeTMNative || st.Mode == answers.ModeFullNative) && a.Restart.TraefikSystemd:
 			checks = append(checks, Check{Name: "traefik-restart.path active", Run: func(ctx context.Context) (bool, string) {
 				return host.ServiceActive(ctx, restartPathUnit), unitStatus(ctx, restartPathUnit)
 			}, Advice: "sudo systemctl enable --now traefik-restart.path"})
@@ -199,10 +234,7 @@ func (in *Installer) checks(st *state.State) []Check {
 	if a.CrowdSec.Mode != answers.CrowdSecNone {
 		checks = append(checks, Check{Name: "crowdsec lapi reachable", Soft: a.CrowdSec.Mode == answers.CrowdSecConnect, Run: func(ctx context.Context) (bool, string) {
 			if a.CrowdSec.Mode == answers.CrowdSecInstall {
-				if _, err := host.Output(host.DockerCommand(ctx, "exec", "crowdsec", "cscli", "lapi", "status")); err != nil {
-					return false, "cscli lapi status failed"
-				}
-				return true, "cscli lapi status ok"
+				return cscliLAPIStatus(ctx, st.Mode)
 			}
 			key := in.ExistingSecrets(st)[answers.SecretCrowdSecAPIKey]
 			return lapiReachable(ctx, a.CrowdSec.LAPIURL, key)
@@ -221,6 +253,17 @@ func (in *Installer) checks(st *state.State) []Check {
 		return true, h.URL
 	}, Advice: "tm logs"})
 	return checks
+}
+
+func cscliLAPIStatus(ctx context.Context, mode answers.Mode) (bool, string) {
+	cmd := host.DockerCommand(ctx, "exec", "crowdsec", "cscli", "lapi", "status")
+	if mode.IsSystemd() {
+		cmd = host.Privileged(ctx, "cscli", "lapi", "status")
+	}
+	if _, err := host.Output(cmd); err != nil {
+		return false, "cscli lapi status failed"
+	}
+	return true, "cscli lapi status ok"
 }
 
 func externalFacing(a *answers.Answers) bool {
@@ -263,6 +306,10 @@ func acmePath(st *state.State) string {
 		if a.TLS.Method != answers.TLSNone {
 			return filepath.Join(st.Dir, "traefik", "acme.json")
 		}
+	case answers.ModeFullNative:
+		if a.TLS.Method != answers.TLSNone {
+			return answers.NativeAcmePath
+		}
 	case answers.ModeAgentDockerTraefik:
 		if a.TLS.Method != answers.TLSNone {
 			return filepath.Join(st.Dir, "traefik", "acme.json")
@@ -273,6 +320,28 @@ func acmePath(st *state.State) string {
 		}
 	}
 	return ""
+}
+
+func dirWritableBy(path, username string) (bool, string) {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return false, err.Error()
+	}
+	sys, ok := fi.Sys().(*syscall.Stat_t)
+	if !ok {
+		return false, "cannot read the owner of " + path
+	}
+	u, err := user.Lookup(username)
+	if err != nil {
+		return false, "no user " + username
+	}
+	if strconv.FormatUint(uint64(sys.Uid), 10) != u.Uid {
+		return false, path + " is owned by uid " + strconv.FormatUint(uint64(sys.Uid), 10)
+	}
+	if fi.Mode().Perm()&0o200 == 0 {
+		return false, fmt.Sprintf("mode %04o", fi.Mode().Perm())
+	}
+	return true, path
 }
 
 func lapiReachable(ctx context.Context, lapi, key string) (bool, string) {

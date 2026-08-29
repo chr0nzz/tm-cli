@@ -12,6 +12,8 @@ func (in *Installer) Summary(a *answers.Answers) {
 	switch a.Mode {
 	case answers.ModeFull:
 		in.summaryFull(a)
+	case answers.ModeFullNative:
+		in.summaryFullNative(a)
 	case answers.ModeTMDocker:
 		in.summaryTMDocker(a)
 	case answers.ModeTMNative:
@@ -72,6 +74,42 @@ func (in *Installer) staticConfigSummary(a *answers.Answers) {
 	}
 }
 
+func (in *Installer) crowdsecSummary(a *answers.Answers) {
+	if a.CrowdSec.Mode == answers.CrowdSecNone {
+		return
+	}
+	u := in.UI
+	u.Heading("CrowdSec")
+	if a.CrowdSec.Mode == answers.CrowdSecInstall {
+		if a.Mode.IsSystemd() {
+			u.KVMuted("Mode", "installed on this server as a Linux service")
+		} else {
+			u.KVMuted("Mode", "installed as part of this stack")
+		}
+		u.KVMuted("LAPI URL", a.CrowdSec.LAPIURL)
+		u.KVMuted("Bouncer key", a.Secrets[answers.SecretCrowdSecAPIKey])
+		if a.CrowdSec.MachineID != "" {
+			u.KVMuted("Machine ID", a.CrowdSec.MachineID)
+			u.KVMuted("Machine pass", a.Secrets[answers.SecretCrowdSecMachinePassword])
+		}
+		u.KVMuted("Reading", a.Mounts.AccessLogPath)
+	} else {
+		u.KVMuted("Mode", "connected to existing instance")
+		u.KVMuted("LAPI URL", a.CrowdSec.LAPIURL)
+		if a.CrowdSec.MachineID != "" {
+			u.KVMuted("Machine ID", a.CrowdSec.MachineID)
+		} else if !a.Mode.IsAgent() {
+			u.Info("Alerts need machine credentials - add CROWDSEC_MACHINE_ID / CROWDSEC_MACHINE_PASSWORD later in Settings or env.")
+		}
+	}
+	if a.Mode.IsAgent() {
+		u.Info("CrowdSec decisions and alerts show up in the CrowdSec tab once this agent is added in TM.")
+	} else {
+		u.Info("Enable the CrowdSec tab in Traefik Manager under Settings to view decisions and alerts.")
+	}
+	u.Warn("tm does not attach the CrowdSec bouncer to Traefik, so nothing is blocked yet - the CrowdSec tab shows what it detects.")
+}
+
 func (in *Installer) summaryFull(a *answers.Answers) {
 	u := in.UI
 	scheme := a.Scheme()
@@ -88,25 +126,7 @@ func (in *Installer) summaryFull(a *answers.Answers) {
 		u.KVMuted("Dynamic config", a.Dir+"/traefik/config/*.yml")
 	}
 	in.staticConfigSummary(a)
-	if a.CrowdSec.Mode != answers.CrowdSecNone {
-		u.Heading("CrowdSec")
-		if a.CrowdSec.Mode == answers.CrowdSecInstall {
-			u.KVMuted("Mode", "installed as part of this stack")
-			u.KVMuted("LAPI URL", answers.DefaultLAPIURL)
-			u.KVMuted("Bouncer key", a.Secrets[answers.SecretCrowdSecAPIKey])
-			u.KVMuted("Machine ID", a.CrowdSec.MachineID)
-			u.KVMuted("Machine pass", a.Secrets[answers.SecretCrowdSecMachinePassword])
-		} else {
-			u.KVMuted("Mode", "connected to existing instance")
-			u.KVMuted("LAPI URL", a.CrowdSec.LAPIURL)
-			if a.CrowdSec.MachineID != "" {
-				u.KVMuted("Machine ID", a.CrowdSec.MachineID)
-			} else {
-				u.Info("Alerts need machine credentials - add CROWDSEC_MACHINE_ID / CROWDSEC_MACHINE_PASSWORD later in Settings or env.")
-			}
-		}
-		u.Info("Enable the CrowdSec tab in Traefik Manager under Settings to view decisions and alerts.")
-	}
+	in.crowdsecSummary(a)
 	u.Blank()
 	u.Code("tm status")
 	u.Code("tm logs traefik-manager")
@@ -116,6 +136,57 @@ func (in *Installer) summaryFull(a *answers.Answers) {
 	u.Blank()
 	if a.Deployment == answers.DeploymentExternal {
 		u.Warn(fmt.Sprintf("DNS A records for %s and %s must point to this server's IP.", a.Hosts.Dashboard, a.Hosts.Manager))
+	}
+	if a.TLS.Method == answers.TLSNone {
+		u.Warn("TLS is disabled. Consider enabling it before exposing this publicly.")
+	}
+	u.Blank()
+}
+
+func (in *Installer) summaryFullNative(a *answers.Answers) {
+	u := in.UI
+	u.Done("Setup complete!")
+	if a.Hosts.Dashboard != "" {
+		u.KVAccent("Traefik dashboard", a.Scheme()+"://"+a.Hosts.Dashboard)
+	}
+	u.KVAccent("Traefik Manager", "http://"+host.PrimaryIP()+":"+a.Native.Port)
+	u.Blank()
+	in.printPassword("sudo journalctl -u traefik-manager")
+	if in.TraefikVersion != "" {
+		u.KV("Traefik", ui.MutedStyle.Render(in.TraefikVersion+"  "+answers.TraefikBinaryPath))
+	}
+	u.KV("Install dir", ui.MutedStyle.Render(a.Native.InstallDir))
+	u.KV("Data dir", ui.MutedStyle.Render(a.Native.DataDir))
+	u.Blank()
+	u.KVMuted("Static config", a.Mounts.StaticConfigPath)
+	if a.Config.Layout == answers.LayoutSingle {
+		u.KVMuted("Dynamic config", a.Config.Path)
+	} else {
+		u.KVMuted("Dynamic config", a.Config.Dir+"/*.yml")
+	}
+	u.KVMuted("Access log", a.Mounts.AccessLogPath)
+	if a.TLS.Method != answers.TLSNone {
+		u.KVMuted("Certificates", a.Mounts.AcmePath)
+	}
+	in.staticConfigSummary(a)
+	in.crowdsecSummary(a)
+	u.Blank()
+	u.Code("tm status")
+	u.Code("tm logs")
+	u.Code("tm logs traefik")
+	u.Blank()
+	u.Heading("Updating")
+	u.Code("tm update")
+	u.Blank()
+	if a.Deployment == answers.DeploymentExternal {
+		if a.Hosts.Dashboard != "" {
+			u.Warn("DNS A record for " + a.Hosts.Dashboard + " must point to this server's IP.")
+		}
+		ports := "80/tcp"
+		if a.TLS.Method != answers.TLSNone {
+			ports = "80/tcp and 443/tcp"
+		}
+		u.Warn("Ports " + ports + " must be open on this server's firewall.")
 	}
 	if a.TLS.Method == answers.TLSNone {
 		u.Warn("TLS is disabled. Consider enabling it before exposing this publicly.")
@@ -135,6 +206,7 @@ func (in *Installer) summaryTMDocker(a *answers.Answers) {
 	in.printPassword("docker logs traefik-manager")
 	u.KV("Install dir", ui.MutedStyle.Render(a.Dir))
 	in.staticConfigSummary(a)
+	in.crowdsecSummary(a)
 	u.Blank()
 	u.Code("tm status")
 	u.Code("tm logs")
@@ -153,6 +225,7 @@ func (in *Installer) summaryNative(a *answers.Answers) {
 	u.KV("Install dir", ui.MutedStyle.Render(a.Native.InstallDir))
 	u.KV("Data dir", ui.MutedStyle.Render(a.Native.DataDir))
 	in.staticConfigSummary(a)
+	in.crowdsecSummary(a)
 	u.Blank()
 	u.Code("tm status")
 	u.Code("tm logs")
@@ -198,6 +271,7 @@ func (in *Installer) summaryAgent(a *answers.Answers) {
 			}
 		}
 	}
+	in.crowdsecSummary(a)
 	u.Blank()
 	u.Title("Next steps:")
 	u.Line("%s", ui.MutedStyle.Render("1. In TM Settings -> Agents, click Add Agent"))

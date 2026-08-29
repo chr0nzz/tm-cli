@@ -66,7 +66,7 @@ func installLocation(st *state.State) string {
 	switch st.Mode {
 	case answers.ModeAgentBinary:
 		return answers.AgentBinaryPath + " and its systemd unit"
-	case answers.ModeTMNative:
+	case answers.ModeTMNative, answers.ModeFullNative:
 		if st.Dir != "" {
 			return st.Dir
 		}
@@ -89,7 +89,7 @@ func resolveState(cmd *cobra.Command, u *ui.UI) (*state.State, error) {
 			return nil, Exit(1)
 		}
 		if errors.Is(err, state.ErrNotFound) {
-			return nil, fmt.Errorf("no tm install found here: run tm install, or pass --dir <install dir>")
+			return nil, fmt.Errorf("%w here: run tm install, or pass --dir <install dir>", state.ErrNotFound)
 		}
 		return nil, err
 	}

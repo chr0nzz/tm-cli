@@ -83,9 +83,6 @@ func newAddCmd() *cobra.Command {
 			section := ""
 			switch strings.ToLower(args[0]) {
 			case "crowdsec":
-				if st.Mode == answers.ModeTMDocker || st.Mode == answers.ModeTMNative {
-					return fmt.Errorf("crowdsec is not available for %s installs", st.Mode)
-				}
 				section = "crowdsec"
 			default:
 				return fmt.Errorf("unknown component %q (available: crowdsec)", args[0])

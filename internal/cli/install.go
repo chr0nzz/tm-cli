@@ -276,7 +276,7 @@ func preflightTools(ctx context.Context, u *ui.UI, a *answers.Answers, yes, inte
 			return err
 		}
 		u.OK(strings.Join(cmd, " ") + " found")
-	case a.Mode == answers.ModeTMNative:
+	case a.Mode == answers.ModeTMNative || a.Mode == answers.ModeFullNative:
 		u.Step("Checking dependencies")
 		if !host.HasCommand("git") {
 			return errors.New("git is required. Install it and re-run")
@@ -294,6 +294,11 @@ func preflightTools(ctx context.Context, u *ui.UI, a *answers.Answers, yes, inte
 			return errors.New("systemd is required for the Linux service install")
 		}
 		u.OK("systemd found")
+		if a.Mode == answers.ModeFullNative {
+			if _, err := host.Arch(); err != nil {
+				return err
+			}
+		}
 	case a.Mode == answers.ModeAgentBinary:
 		u.Step("Checking dependencies")
 		if !host.HasCommand("systemctl") {
@@ -328,12 +333,17 @@ func sudoPreflight(ctx context.Context, u *ui.UI, a *answers.Answers) error {
 	switch a.Mode {
 	case answers.ModeTMNative:
 		reasons = []string{"systemd unit", "service user", a.Native.InstallDir, a.Native.DataDir}
+	case answers.ModeFullNative:
+		reasons = []string{"systemd units", "service user", answers.TraefikBinaryPath, a.Native.InstallDir, a.Native.DataDir, answers.NativeTraefikConfigDir, answers.NativeTraefikStateDir, answers.NativeTraefikLogDir}
 	case answers.ModeAgentBinary:
 		reasons = []string{answers.AgentBinaryPath, "systemd unit", "/etc/traefik-manager-agent"}
 	default:
 		if host.NeedsPrivilege(a.Dir) {
 			reasons = []string{"install directory " + a.Dir}
 		}
+	}
+	if a.Mode.IsSystemd() && a.CrowdSec.Mode == answers.CrowdSecInstall {
+		reasons = append(reasons, "the crowdsec package")
 	}
 	if len(reasons) == 0 {
 		return nil
@@ -354,6 +364,16 @@ func existingInstall(a *answers.Answers, u *ui.UI) (*state.State, error) {
 			if err == nil && st.Mode == answers.ModeTMNative {
 				return st, nil
 			}
+		}
+	case answers.ModeFullNative:
+		if host.Exists("/etc/systemd/system/traefik-manager.service") {
+			st, _, err := state.AdoptSystemd()
+			if err == nil && st.Mode == answers.ModeTMNative {
+				return st, nil
+			}
+		}
+		if host.Exists("/etc/systemd/system/traefik.service") {
+			return nil, errors.New("a traefik.service systemd unit already exists on this host: remove it first, or install Traefik Manager alongside it with --mode tm-native")
 		}
 	case answers.ModeAgentBinary:
 		if host.Exists("/etc/systemd/system/tma.service") {

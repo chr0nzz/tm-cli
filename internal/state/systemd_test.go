@@ -231,3 +231,52 @@ func TestParseUnitQuotedEnvironment(t *testing.T) {
 		t.Fatal("user not parsed")
 	}
 }
+
+func TestAdoptSystemdTellsFullNativeFromTMNative(t *testing.T) {
+	isolate(t)
+	dir := t.TempDir()
+	defer func(n, tr, e string) { nativeUnitPath, traefikUnitPath, nativeStatePath = n, tr, e }(nativeUnitPath, traefikUnitPath, nativeStatePath)
+	nativeUnitPath = filepath.Join(dir, "traefik-manager.service")
+	traefikUnitPath = filepath.Join(dir, "traefik.service")
+	nativeStatePath = filepath.Join(dir, "tm-state.yml")
+
+	tmUnit := "[Service]\nUser=traefik-manager\nWorkingDirectory=/opt/traefik-manager\nExecStart=/opt/traefik-manager/venv/bin/gunicorn --bind 0.0.0.0:5000 app:app\nEnvironment=\"SETTINGS_PATH=/var/lib/traefik-manager/manager.yml\"\n"
+	if err := os.WriteFile(nativeUnitPath, []byte(tmUnit), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	st, _, err := AdoptSystemd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Mode != answers.ModeTMNative {
+		t.Fatalf("with no traefik unit the mode must be tm-native, got %s", st.Mode)
+	}
+
+	foreign := "[Service]\nExecStart=/usr/bin/traefik --configfile=/srv/other/traefik.yml\n"
+	if err := os.WriteFile(traefikUnitPath, []byte(foreign), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	st, _, err = AdoptSystemd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Mode != answers.ModeTMNative {
+		t.Fatalf("a traefik unit tm did not write must stay tm-native, got %s", st.Mode)
+	}
+
+	ours := "[Service]\nExecStart=\"/usr/local/bin/traefik\" \"--configfile=/etc/traefik/traefik.yml\"\n"
+	if err := os.WriteFile(traefikUnitPath, []byte(ours), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	st, _, err = AdoptSystemd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Mode != answers.ModeFullNative {
+		t.Fatalf("a tm-written traefik unit means full-native, got %s", st.Mode)
+	}
+	if _, ok := st.OwnedFiles[traefikUnitPath]; !ok {
+		t.Fatal("the traefik unit must be recorded as owned so reconfigure and uninstall see it")
+	}
+}

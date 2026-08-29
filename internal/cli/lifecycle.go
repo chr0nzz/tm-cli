@@ -7,8 +7,11 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/chr0nzz/tm-cli/internal/host"
 	"github.com/chr0nzz/tm-cli/internal/installer"
+	"github.com/chr0nzz/tm-cli/internal/state"
 	"github.com/chr0nzz/tm-cli/internal/ui"
+	"path/filepath"
 )
 
 func init() {
@@ -42,6 +45,7 @@ func newStatusCmd() *cobra.Command {
 
 func newUpdateCmd() *cobra.Command {
 	var channel string
+	var force bool
 	cmd := &cobra.Command{
 		Use:   "update",
 		Short: "Update to the latest images, code, or agent binary and restart",
@@ -55,6 +59,7 @@ func newUpdateCmd() *cobra.Command {
 				return err
 			}
 			inst := newInstaller(u, false)
+			inst.Force = force
 			if channel != "" {
 				if err := inst.SwitchChannel(ctx, st, channel); err != nil {
 					return err
@@ -70,6 +75,7 @@ func newUpdateCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&channel, "channel", "", "switch release channel: stable or beta")
+	cmd.Flags().BoolVar(&force, "force", false, "reinstall dependencies and rebuild assets even when nothing changed")
 	_ = cmd.Flags().MarkHidden("channel")
 	return cmd
 }
@@ -215,7 +221,7 @@ login, which also leaves the /setup page open until a password is set there.`,
 }
 
 func newUninstallCmd() *cobra.Command {
-	var purge, yes bool
+	var purge, yes, self bool
 	cmd := &cobra.Command{
 		Use:   "uninstall",
 		Short: "Stop and remove the install (keeps data unless --purge)",
@@ -224,8 +230,14 @@ func newUninstallCmd() *cobra.Command {
 			ctx, cancel := signalContext()
 			defer cancel()
 			u := ui.New()
+			if self {
+				return handleAbort(uninstallSelf(u, yes))
+			}
 			st, err := resolveState(cmd, u)
 			if err != nil {
+				if errors.Is(err, state.ErrNotFound) {
+					return fmt.Errorf("%w. tm itself is removed with tm uninstall --self", err)
+				}
 				return err
 			}
 			where := installLocation(st)
@@ -255,6 +267,55 @@ func newUninstallCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&purge, "purge", false, "also remove configs, backups, certificates, data dirs, and volumes")
+	cmd.Flags().BoolVar(&self, "self", false, "remove the tm binary itself, leaving any installs running")
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "do not ask for confirmation")
 	return cmd
+}
+
+func uninstallSelf(u *ui.UI, yes bool) error {
+	exe := host.Executable()
+	if exe == "" {
+		return errors.New("could not work out where tm is installed")
+	}
+	known, _ := state.Registry()
+	u.Warn("this removes tm itself from " + exe)
+	if len(known) > 0 {
+		u.Blank()
+		u.Info("these installs stay running and keep working, they just stop being managed by tm:")
+		for _, p := range known {
+			line := p
+			if st, err := state.Load(p); err == nil {
+				line = fmt.Sprintf("%-22s %s", st.Mode, installLocation(st))
+			}
+			u.Line("%s", ui.MutedStyle.Render(line))
+		}
+		u.Blank()
+		u.Info("uninstall them first with tm uninstall if that is what you meant")
+	}
+	if !yes {
+		if !ui.Interactive() {
+			return errors.New("refusing to remove tm without --yes in a non-interactive session")
+		}
+		ok, err := confirm("Remove tm?", false)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return Exit(0)
+		}
+	}
+	if err := host.Remove(exe, false); err != nil {
+		return fmt.Errorf("remove %s: %w", exe, err)
+	}
+	u.OK(exe + " removed")
+	reg := state.RegistryPath()
+	if host.Exists(reg) {
+		if err := host.Remove(filepath.Dir(reg), true); err != nil {
+			u.Warn("could not remove " + filepath.Dir(reg) + ": " + err.Error())
+		} else {
+			u.OK(filepath.Dir(reg) + " removed")
+		}
+	}
+	u.Done("tm removed")
+	return nil
 }

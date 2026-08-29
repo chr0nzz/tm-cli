@@ -14,6 +14,8 @@ type registryFile struct {
 	Installs []string `yaml:"installs"`
 }
 
+func RegistryPath() string { return registryPath() }
+
 func registryPath() string {
 	if p := os.Getenv("TM_REGISTRY"); p != "" {
 		return p

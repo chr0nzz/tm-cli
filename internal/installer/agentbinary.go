@@ -17,10 +17,15 @@ func (in *Installer) installAgentBinary(ctx context.Context, a *answers.Answers,
 	if err := in.downloadAgentBinary(ctx); err != nil {
 		return err
 	}
+	if err := in.installCrowdSecPackage(ctx, a); err != nil {
+		return err
+	}
 	in.UI.Step("Installing systemd service")
 	if err := in.writeOutput(a, out, st, nil); err != nil {
 		return err
 	}
+	in.registerCrowdSecNative(ctx, a)
+	in.reloadCrowdSec(ctx, a)
 	if err := host.Systemctl(ctx, "daemon-reload"); err != nil {
 		return err
 	}

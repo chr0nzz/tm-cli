@@ -477,3 +477,40 @@ func TestDockerGroupMembershipIsAboutThisProcess(t *testing.T) {
 		t.Fatal("a process that already has the group cannot also be pending")
 	}
 }
+
+func TestInstallPackageArgs(t *testing.T) {
+	cases := map[string]string{
+		"apt-get": "apt-get install -y crowdsec",
+		"dnf":     "dnf install -y crowdsec",
+		"yum":     "yum install -y crowdsec",
+		"zypper":  "zypper --non-interactive install crowdsec",
+		"pacman":  "pacman -S --needed --noconfirm crowdsec",
+	}
+	for pm, want := range cases {
+		if got := strings.Join(InstallPackageArgs(pm, "crowdsec"), " "); got != want {
+			t.Errorf("%s: %q, want %q", pm, got, want)
+		}
+	}
+	if got := InstallPackageArgs("apk", "crowdsec"); got != nil {
+		t.Errorf("an unknown package manager must have no command, got %v", got)
+	}
+}
+
+func TestPackageManagerPrefersApt(t *testing.T) {
+	old := lookPath
+	defer func() { lookPath = old }()
+	lookPath = func(name string) (string, error) {
+		if name == "dnf" || name == "apt-get" {
+			return "/usr/bin/" + name, nil
+		}
+		return "", errors.New("not found")
+	}
+	pm, err := PackageManager()
+	if err != nil || pm != "apt-get" {
+		t.Fatalf("PackageManager() = %q, %v", pm, err)
+	}
+	lookPath = func(string) (string, error) { return "", errors.New("not found") }
+	if _, err := PackageManager(); err == nil {
+		t.Fatal("a host with no package manager must report an error")
+	}
+}

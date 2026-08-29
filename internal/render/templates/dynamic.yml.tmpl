@@ -1,2 +1,15 @@
 # Traefik dynamic configuration
 # Traefik Manager writes routers, services and middlewares here.
+{{- if .Host }}
+http:
+  routers:
+    dashboard:
+      rule: "Host(`{{ .Host }}`)"
+      entryPoints:
+        - {{ .EntryPoint }}
+      service: api@internal
+{{- if .TLS }}
+      tls:
+        certResolver: {{ .Resolver }}
+{{- end }}
+{{- end }}

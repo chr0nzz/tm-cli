@@ -8,25 +8,33 @@ import (
 )
 
 type tmView struct {
-	Image       string
-	Network     string
-	External    bool
-	SocketProxy bool
-	PoisonPill  bool
-	Port        string
-	Volumes     []string
-	Env         []string
-	Labels      []string
+	Image        string
+	Network      string
+	External     bool
+	SocketProxy  bool
+	NamedVolumes []string
+	Port         string
+	Volumes      []string
+	Env          []string
+	Labels       []string
+	CrowdSec     *crowdsecView
 }
 
 func renderTMDocker(a *answers.Answers) (*Output, error) {
+	install := a.CrowdSec.Mode == answers.CrowdSecInstall
 	b := &builder{}
 	b.dir("config")
 	b.dir("backups")
+	if install {
+		b.dir("crowdsec")
+	}
 	b.tmpl("docker-compose.yml", 0o644, "compose-tm.tmpl", newTMView(a))
 	b.env(a)
 	if a.Config.Layout == answers.LayoutSingle {
-		b.seedTmpl("config/dynamic.yml", 0o644, "dynamic.yml.tmpl", nil)
+		b.seedTmpl("config/dynamic.yml", 0o644, "dynamic.yml.tmpl", dashboardView{})
+	}
+	if install {
+		b.acquisDocker()
 	}
 	return b.result()
 }
@@ -37,12 +45,18 @@ func newTMView(a *answers.Answers) tmView {
 	pill := static && a.Restart.Method == answers.RestartPoisonPill
 	socket := static && a.Restart.Method == answers.RestartSocket
 	single := a.Config.Layout == answers.LayoutSingle
+	install := a.CrowdSec.Mode == answers.CrowdSecInstall
 	v := tmView{
 		Image:       answers.ManagerImage + ":" + a.ImageTag(),
 		Network:     a.Network.Name,
 		External:    a.Network.External,
 		SocketProxy: proxy,
-		PoisonPill:  pill,
+	}
+	if pill {
+		v.NamedVolumes = append(v.NamedVolumes, "tm-signals")
+	}
+	if install {
+		v.NamedVolumes = append(v.NamedVolumes, "crowdsec_data")
 	}
 	if !a.Access.ViaTraefik {
 		v.Port = a.Access.Port
@@ -68,9 +82,16 @@ func newTMView(a *answers.Answers) tmView {
 	} else {
 		v.Volumes = append(v.Volumes, "./config:/app/config/dynamic")
 	}
-	v.Env = tmEnv(a, static, proxy, pill, single)
+	v.Env = append(tmEnv(a, static, proxy, pill, single), crowdsecEnv(a)...)
 	if a.Access.ViaTraefik {
 		v.Labels = tmLabels(a)
+	}
+	if install {
+		v.CrowdSec = &crowdsecView{
+			Network:    a.Network.Name,
+			BouncerVar: crowdsecBouncerFull,
+			LogVolume:  a.Mounts.AccessLogPath + ":" + traefikAccessLog + ":ro",
+		}
 	}
 	return v
 }
@@ -85,7 +106,29 @@ type nativeView struct {
 	DataDir      string
 	Port         string
 	ConfigEnv    string
+	EnvFile      string
 	OptionalEnv  []string
+}
+
+func baseNativeView(a *answers.Answers) nativeView {
+	return nativeView{
+		User:         "traefik-manager",
+		InstallDir:   a.Native.InstallDir,
+		ExecStartArg: SystemdQuote(filepath.Join(a.Native.InstallDir, "venv", "bin", "gunicorn")),
+		HomeEnv:      SystemdQuote("HOME=" + a.Native.InstallDir),
+		BackupEnv:    SystemdQuote("BACKUP_DIR=" + filepath.Join(a.Native.DataDir, "backups")),
+		SettingsEnv:  SystemdQuote("SETTINGS_PATH=" + filepath.Join(a.Native.DataDir, "manager.yml")),
+		DataDir:      a.Native.DataDir,
+		Port:         a.Native.Port,
+		ConfigEnv:    nativeConfigEnv(a),
+	}
+}
+
+func nativeConfigEnv(a *answers.Answers) string {
+	if a.Config.Layout == answers.LayoutSingle {
+		return SystemdQuote("CONFIG_PATH=" + a.Config.Path)
+	}
+	return SystemdQuote("CONFIG_DIR=" + a.Config.Dir)
 }
 
 type restartWatcherView struct {
@@ -99,26 +142,12 @@ func renderTMNative(a *answers.Answers, user string) (*Output, error) {
 	static := a.Mounts.StaticConfig
 	pill := static && a.Restart.Method == answers.RestartPoisonPill
 	socket := static && a.Restart.Method == answers.RestartSocket
-	v := nativeView{
-		User:         "traefik-manager",
-		InstallDir:   a.Native.InstallDir,
-		ExecStartArg: SystemdQuote(filepath.Join(a.Native.InstallDir, "venv", "bin", "gunicorn")),
-		HomeEnv:      SystemdQuote("HOME=" + a.Native.InstallDir),
-		BackupEnv:    SystemdQuote("BACKUP_DIR=" + filepath.Join(a.Native.DataDir, "backups")),
-		SettingsEnv:  SystemdQuote("SETTINGS_PATH=" + filepath.Join(a.Native.DataDir, "manager.yml")),
-		DataDir:      a.Native.DataDir,
-		Port:         a.Native.Port,
-	}
+	v := baseNativeView(a)
 	if !a.Native.ServiceUser {
 		if user == "" {
 			return nil, errors.New("render: a user name is required when native.service_user is false")
 		}
 		v.User = user
-	}
-	if a.Config.Layout == answers.LayoutSingle {
-		v.ConfigEnv = SystemdQuote("CONFIG_PATH=" + a.Config.Path)
-	} else {
-		v.ConfigEnv = SystemdQuote("CONFIG_DIR=" + a.Config.Dir)
 	}
 	if a.Mounts.Certs {
 		v.OptionalEnv = append(v.OptionalEnv, SystemdQuote("ACME_JSON_PATH="+a.Mounts.AcmePath))
@@ -138,11 +167,18 @@ func renderTMNative(a *answers.Answers, user string) (*Output, error) {
 			v.OptionalEnv = append(v.OptionalEnv, SystemdQuote("SIGNAL_FILE_PATH="+a.Restart.SignalFile))
 		}
 	}
+	if a.CrowdSec.Mode != answers.CrowdSecNone {
+		v.EnvFile = NativeEnvPath
+		v.OptionalEnv = append(v.OptionalEnv, nativeCrowdSecEnv(a)...)
+	}
 
 	b := &builder{}
 	b.dir(filepath.Join(a.Native.DataDir, "backups"))
 	if pill {
 		b.dir(filepath.Dir(a.Restart.SignalFile))
+	}
+	if a.CrowdSec.Mode == answers.CrowdSecInstall {
+		b.dir(CrowdSecAcquisDir)
 	}
 	b.systemTmpl(NativeUnitPath, 0o644, "tm.service.tmpl", v)
 	if static && a.Restart.TraefikSystemd {
@@ -154,6 +190,10 @@ func renderTMNative(a *answers.Answers, user string) (*Output, error) {
 		}
 		b.systemTmpl(RestartPathUnit, 0o644, "traefik-restart.path.tmpl", w)
 		b.systemTmpl(RestartServiceUnit, 0o644, "traefik-restart.service.tmpl", w)
+	}
+	b.acquisNative(a)
+	if len(a.SecretKeys()) > 0 {
+		b.system(NativeEnvPath, 0o600, EnvFile(a))
 	}
 	return b.result()
 }

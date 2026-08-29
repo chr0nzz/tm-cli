@@ -48,7 +48,7 @@ curl -fsSL https://get-traefik.xyzlab.dev | bash -s -- --mode agent
 |---|---|
 | `tm install` | Runs the wizard and installs. On an existing install, offers update or reconfigure |
 | `tm status` | Mode, directory, services, URLs, health |
-| `tm update` | Pulls images, `git pull`, or downloads the agent binary, then restarts |
+| `tm update` | Pulls images, `git pull`, or downloads the agent binary, then restarts. Skips the rebuild when nothing changed, `--force` does it anyway |
 | `tm logs [service]` | Follows the logs (`--no-follow`, `-n <lines>`) |
 | `tm restart`, `tm start`, `tm stop` | Whole install, or one service |
 | `tm password` | Prints the temporary password from the logs |
@@ -56,7 +56,7 @@ curl -fsSL https://get-traefik.xyzlab.dev | bash -s -- --mode agent
 | `tm reconfigure [--section <id>]` | Re-runs the wizard pre-filled, regenerates tm-owned files, restarts (`--list` shows the sections) |
 | `tm add crowdsec` | Adds CrowdSec to an existing install |
 | `tm doctor` | Checks Docker, ports, DNS, `acme.json`, health endpoints, CrowdSec |
-| `tm uninstall` | Stops the services and removes the files tm wrote, keeping any you changed. `--purge` also removes configs, data and volumes |
+| `tm uninstall` | Stops the services and removes the files tm wrote, keeping any you changed. `--purge` also removes configs, data and volumes. `--self` removes `tm` itself and leaves installs running |
 | `tm version` | Prints the version |
 | `tm self-update` | Updates `tm` itself (`--version` picks a release) |
 | `tm completion bash\|zsh\|fish` | Shell completion |

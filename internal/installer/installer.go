@@ -21,9 +21,11 @@ type Installer struct {
 	Version         string
 	Compose         []string
 	Yes             bool
+	Force           bool
 	AllowUnverified bool
 	Confirm         func(prompt string, def bool) (bool, error)
 	TempPassword    string
+	TraefikVersion  string
 }
 
 func New(u *ui.UI, version string) *Installer {
@@ -63,6 +65,10 @@ func (in *Installer) Install(ctx context.Context, a *answers.Answers, opts Optio
 	}
 	st := state.New(a, in.Version, composeCmd)
 	switch a.Mode {
+	case answers.ModeFullNative:
+		if err := in.installFullNative(ctx, a, out, st); err != nil {
+			return nil, err
+		}
 	case answers.ModeTMNative:
 		if err := in.installNative(ctx, a, out, st); err != nil {
 			return nil, err

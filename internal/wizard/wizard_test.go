@@ -15,12 +15,18 @@ func TestSectionsPerMode(t *testing.T) {
 			{"tls", "TLS / Certificates"}, {"config", "Dynamic config"}, {"mounts", "Optional mounts"},
 			{"crowdsec", "CrowdSec"}, {"network", "Docker network"},
 		},
+		answers.ModeFullNative: {
+			{"general", "General"}, {"deployment", "Deployment type"}, {"tls", "TLS / Certificates"},
+			{"domain", "Domain"}, {"config", "Dynamic config"}, {"mounts", "Static config editor"},
+			{"crowdsec", "CrowdSec"},
+		},
 		answers.ModeTMDocker: {
 			{"general", "General"}, {"network", "Network"}, {"access", "Access"},
-			{"config", "Dynamic config"}, {"mounts", "Optional mounts"},
+			{"config", "Dynamic config"}, {"mounts", "Optional mounts"}, {"crowdsec", "CrowdSec"},
 		},
 		answers.ModeTMNative: {
-			{"general", "General"}, {"user", "Service user"}, {"config", "Dynamic config"}, {"mounts", "Optional mounts"},
+			{"general", "General"}, {"user", "Service user"}, {"config", "Dynamic config"},
+			{"mounts", "Optional mounts"}, {"crowdsec", "CrowdSec"},
 		},
 		answers.ModeAgentDocker: {
 			{"apikey", "API key"}, {"traefik", "Traefik connection"}, {"paths", "Optional paths"},
@@ -62,6 +68,10 @@ func TestFindSectionAliases(t *testing.T) {
 		{answers.ModeFull, "crowdsec", "crowdsec"},
 		{answers.ModeFull, " TLS ", "tls"},
 		{answers.ModeFull, "dir", "general"},
+		{answers.ModeFullNative, "static", "mounts"},
+		{answers.ModeFullNative, "restart", "mounts"},
+		{answers.ModeFullNative, "network", "general"},
+		{answers.ModeFullNative, "dir", "general"},
 		{answers.ModeTMDocker, "tls", "access"},
 		{answers.ModeTMDocker, "static", "mounts"},
 		{answers.ModeTMNative, "restart", "mounts"},
@@ -156,10 +166,18 @@ func TestReviewLinesTMDocker(t *testing.T) {
 		"   3  Access                via Traefik  manager.example.com  TLS:http",
 		"   4  Dynamic config        Single file",
 		"   5  Optional mounts       logs certs static(restart:socket)",
+		"   6  CrowdSec              disabled",
 	}
 	if got := ReviewLines(a); !reflect.DeepEqual(got, want) {
 		t.Errorf("tm-docker review\n got %q\nwant %q", got, want)
 	}
+	a.CrowdSec.Mode = answers.CrowdSecInstall
+	a.Finalize()
+	if got := ReviewLines(a)[5]; got != "   6  CrowdSec              install alongside" {
+		t.Errorf("tm-docker crowdsec install: %q", got)
+	}
+	a.CrowdSec.Mode = answers.CrowdSecNone
+	a.Finalize()
 	a.TLS.Method = answers.TLSHTTP
 	a.Finalize()
 	if got := ReviewLines(a)[2]; got != "   3  Access                via Traefik  manager.example.com  TLS:http" {
@@ -189,10 +207,17 @@ func TestReviewLinesTMNative(t *testing.T) {
 		"   2  Service user          dedicated (traefik-manager)",
 		"   3  Dynamic config        Directory  /etc/traefik/conf.d",
 		"   4  Optional mounts       certs logs static(restart:poison-pill)",
+		"   5  CrowdSec              disabled",
 	}
 	if got := ReviewLines(a); !reflect.DeepEqual(got, want) {
 		t.Errorf("tm-native review\n got %q\nwant %q", got, want)
 	}
+	a.CrowdSec.Mode = answers.CrowdSecInstall
+	a.Finalize()
+	if got := ReviewLines(a)[4]; got != "   5  CrowdSec              install (CrowdSec package)" {
+		t.Errorf("tm-native crowdsec install: %q", got)
+	}
+	a.CrowdSec.Mode = answers.CrowdSecNone
 	a.Native.ServiceUser = false
 	a.Config.Layout = answers.LayoutSingle
 	a.Mounts.Certs = false
@@ -203,6 +228,7 @@ func TestReviewLinesTMNative(t *testing.T) {
 		"   2  Service user          current user",
 		"   3  Dynamic config        Single file  /etc/traefik/dynamic.yml",
 		"   4  Optional mounts       logs",
+		"   5  CrowdSec              disabled",
 	}
 	if got := ReviewLines(a); !reflect.DeepEqual(got, want) {
 		t.Errorf("tm-native review (variant)\n got %q\nwant %q", got, want)
@@ -444,6 +470,8 @@ func TestSectionHeaders(t *testing.T) {
 		{answers.ModeFull, "crowdsec", "CrowdSec IDS"},
 		{answers.ModeFull, "network", "Docker Network"},
 		{answers.ModeFull, "mounts", "Optional Mounts"},
+		{answers.ModeFullNative, "mounts", "Static Config Editor"},
+		{answers.ModeFullNative, "crowdsec", "CrowdSec IDS"},
 		{answers.ModeTMDocker, "network", "Network"},
 		{answers.ModeTMNative, "user", "Service User"},
 		{answers.ModeAgentDocker, "restart", "Traefik restart"},
@@ -459,5 +487,30 @@ func TestSectionHeaders(t *testing.T) {
 		if got := sectionHeader(c.mode, s.Section); got != c.want {
 			t.Errorf("%s %s: got %q want %q", c.mode, c.id, got, c.want)
 		}
+	}
+}
+
+func TestCrowdSecSectionExistsForEveryMode(t *testing.T) {
+	for _, mode := range answers.Modes {
+		s, err := findSection(mode, "crowdsec")
+		if err != nil {
+			t.Errorf("%s: tm add crowdsec has no section: %v", mode, err)
+			continue
+		}
+		if s.run == nil {
+			t.Errorf("%s: crowdsec section has no runner", mode)
+		}
+	}
+}
+
+func TestFreeOfLAPIRejectsTheCrowdSecPort(t *testing.T) {
+	if err := freeOfLAPI(answers.NativeLAPIPort); err == nil {
+		t.Error("8080 is the crowdsec lapi port and must be rejected")
+	}
+	if err := freeOfLAPI("8081"); err != nil {
+		t.Errorf("8081 is free: %v", err)
+	}
+	if err := freeOfLAPI("nope"); err == nil {
+		t.Error("a non-port must be rejected")
 	}
 }

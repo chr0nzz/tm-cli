@@ -42,6 +42,16 @@ func sectionsFor(mode answers.Mode) []section {
 			sec("crowdsec", "CrowdSec", (*wizard).fullCrowdSec),
 			sec("network", "Docker network", (*wizard).fullNetwork),
 		}
+	case answers.ModeFullNative:
+		return []section{
+			sec("general", "General", (*wizard).fnoGeneral),
+			sec("deployment", "Deployment type", (*wizard).fullDeployment),
+			sec("tls", "TLS / Certificates", (*wizard).fullTLS),
+			sec("domain", "Domain", (*wizard).fnoDomain),
+			sec("config", "Dynamic config", (*wizard).configLayout),
+			sec("mounts", "Static config editor", (*wizard).fnoMounts),
+			sec("crowdsec", "CrowdSec", (*wizard).fnoCrowdSec),
+		}
 	case answers.ModeTMDocker:
 		return []section{
 			sec("general", "General", (*wizard).tmdGeneral),
@@ -49,6 +59,7 @@ func sectionsFor(mode answers.Mode) []section {
 			sec("access", "Access", (*wizard).tmdAccess),
 			sec("config", "Dynamic config", (*wizard).configLayout),
 			sec("mounts", "Optional mounts", (*wizard).tmdMounts),
+			sec("crowdsec", "CrowdSec", (*wizard).tmdCrowdSec),
 		}
 	case answers.ModeTMNative:
 		return []section{
@@ -56,6 +67,7 @@ func sectionsFor(mode answers.Mode) []section {
 			sec("user", "Service user", (*wizard).tmnUser),
 			sec("config", "Dynamic config", (*wizard).tmnConfig),
 			sec("mounts", "Optional mounts", (*wizard).tmnMounts),
+			sec("crowdsec", "CrowdSec", (*wizard).tmnCrowdSec),
 		}
 	case answers.ModeAgentDocker:
 		return []section{
@@ -123,6 +135,10 @@ func aliasFor(mode answers.Mode, id string) string {
 			return "location"
 		}
 		return "general"
+	case "network":
+		if mode == answers.ModeFullNative {
+			return "general"
+		}
 	}
 	return id
 }
@@ -226,6 +242,9 @@ func sectionHeader(mode answers.Mode, s Section) string {
 	case "config":
 		return "Dynamic Config"
 	case "mounts":
+		if mode == answers.ModeFullNative {
+			return "Static Config Editor"
+		}
 		return "Optional Mounts"
 	case "network":
 		if mode == answers.ModeFull {
@@ -253,6 +272,8 @@ func stepTitle(mode answers.Mode) string {
 	switch mode {
 	case answers.ModeFull:
 		return "Traefik + Traefik Manager Setup"
+	case answers.ModeFullNative:
+		return "Traefik + Traefik Manager - Linux Service Setup"
 	case answers.ModeTMDocker:
 		return "Traefik Manager - Docker Setup"
 	case answers.ModeTMNative:
@@ -403,8 +424,19 @@ func PickMode(ctx context.Context, u *ui.UI, in *os.File) (answers.Mode, error) 
 	case "agent":
 		return w.pickAgentMethod()
 	}
-	w.u.OK(answers.ModeFull.Label())
-	return answers.ModeFull, nil
+	mode := answers.ModeFull
+	err = w.form(huh.NewSelect[answers.Mode]().
+		Title("Deployment method").
+		Options(
+			huh.NewOption("Docker", answers.ModeFull),
+			huh.NewOption("Linux service (systemd)", answers.ModeFullNative),
+		).
+		Value(&mode))
+	if err != nil {
+		return "", err
+	}
+	w.u.OK(mode.Label())
+	return mode, nil
 }
 
 func PickAgentMethod(ctx context.Context, u *ui.UI, in *os.File) (answers.Mode, error) {

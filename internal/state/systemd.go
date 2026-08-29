@@ -11,6 +11,7 @@ import (
 
 var (
 	nativeUnitPath     = "/etc/systemd/system/traefik-manager.service"
+	traefikUnitPath    = "/etc/systemd/system/traefik.service"
 	agentUnitPath      = "/etc/systemd/system/tma.service"
 	restartPathUnit    = "/etc/systemd/system/traefik-restart.path"
 	restartServiceUnit = "/etc/systemd/system/traefik-restart.service"
@@ -23,12 +24,27 @@ var (
 
 func AdoptSystemd() (*State, map[string]string, error) {
 	if exists(nativeUnitPath) {
+		if tmManagedTraefikUnit() {
+			return AdoptUnit(answers.ModeFullNative)
+		}
 		return AdoptUnit(answers.ModeTMNative)
 	}
 	if exists(agentUnitPath) {
 		return AdoptUnit(answers.ModeAgentBinary)
 	}
 	return nil, nil, fmt.Errorf("%w: neither %s nor %s exists", ErrNotFound, nativeUnitPath, agentUnitPath)
+}
+
+func tmManagedTraefikUnit() bool {
+	if !exists(traefikUnitPath) {
+		return false
+	}
+	data, err := readFile(traefikUnitPath)
+	if err != nil {
+		return false
+	}
+	exec := parseUnit(data).first("ExecStart")
+	return strings.Contains(exec, "/usr/local/bin/traefik") && strings.Contains(exec, "/etc/traefik/traefik.yml")
 }
 
 func AdoptUnit(mode answers.Mode) (*State, map[string]string, error) {
@@ -42,7 +58,7 @@ func AdoptUnit(mode answers.Mode) (*State, map[string]string, error) {
 func inspectUnit(mode answers.Mode) (*State, map[string]string, error) {
 	var unitPath string
 	switch mode {
-	case answers.ModeTMNative:
+	case answers.ModeTMNative, answers.ModeFullNative:
 		unitPath = nativeUnitPath
 	case answers.ModeAgentBinary:
 		unitPath = agentUnitPath
@@ -61,8 +77,13 @@ func inspectUnit(mode answers.Mode) (*State, map[string]string, error) {
 	secrets := map[string]string{}
 	owned := map[string]string{unitPath: Hash(data)}
 	switch mode {
-	case answers.ModeTMNative:
+	case answers.ModeTMNative, answers.ModeFullNative:
 		applyNativeUnit(a, u, owned)
+		if mode == answers.ModeFullNative && exists(traefikUnitPath) {
+			if data, err := readFile(traefikUnitPath); err == nil {
+				owned[traefikUnitPath] = Hash(data)
+			}
+		}
 	case answers.ModeAgentBinary:
 		applyAgentEnv(a, u.env, secrets)
 	}

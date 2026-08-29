@@ -83,7 +83,7 @@ func resetArgs(opts PasswordResetOptions) []string {
 }
 
 func (in *Installer) planFor(ctx context.Context, st *state.State, args []string) (resetPlan, error) {
-	if st.Mode == answers.ModeTMNative {
+	if st.Mode == answers.ModeTMNative || st.Mode == answers.ModeFullNative {
 		return in.nativeResetPlan(ctx, st, args)
 	}
 	if status, _ := containerStatus(ctx, tmContainer); status != "running" {
@@ -126,7 +126,7 @@ func (in *Installer) checkAdminPasswordEnv(ctx context.Context, st *state.State)
 }
 
 func (in *Installer) adminPasswordEnv(ctx context.Context, st *state.State) (bool, string) {
-	if st.Mode == answers.ModeTMNative {
+	if st.Mode == answers.ModeTMNative || st.Mode == answers.ModeFullNative {
 		data, err := host.ReadFile(unitPathFor(nativeUnit))
 		if err != nil {
 			return false, ""
