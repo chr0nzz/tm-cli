@@ -30,8 +30,13 @@ type Input struct {
 
 const (
 	AgentEnvPath        = "/etc/traefik-manager-agent/env"
+	CrowdSecAcquisDir   = "/etc/crowdsec/acquis.d"
+	CrowdSecAcquisPath  = CrowdSecAcquisDir + "/traefik.yaml"
 	AgentUnitPath       = "/etc/systemd/system/tma.service"
 	NativeUnitPath      = "/etc/systemd/system/traefik-manager.service"
+	NativeEnvPath       = "/etc/traefik-manager/env"
+	TraefikUnitPath     = "/etc/systemd/system/traefik.service"
+	LogrotatePath       = "/etc/logrotate.d/traefik"
 	RestartPathUnit     = "/etc/systemd/system/traefik-restart.path"
 	RestartServiceUnit  = "/etc/systemd/system/traefik-restart.service"
 	socketProxyHost     = "tcp://socket-proxy:2375"
@@ -39,8 +44,7 @@ const (
 	dockerSocketVolume  = "/var/run/docker.sock:/var/run/docker.sock:ro"
 	traefikAccessLog    = "/var/log/traefik/access.log"
 	traefikAcmeJSON     = "/etc/traefik/acme.json"
-	crowdsecLAPIURL     = "http://crowdsec:8080"
-	crowdsecBouncerFull = "BOUNCER_KEY_traefik-manager"
+	crowdsecBouncerFull = "BOUNCER_KEY_traefikmanager"
 	crowdsecBouncerTMA  = "BOUNCER_KEY_tma"
 )
 
@@ -52,6 +56,8 @@ func Render(in Input) (*Output, error) {
 	switch a.Mode {
 	case answers.ModeFull:
 		return renderFull(a)
+	case answers.ModeFullNative:
+		return renderFullNative(a)
 	case answers.ModeTMDocker:
 		return renderTMDocker(a)
 	case answers.ModeTMNative:
@@ -112,6 +118,10 @@ func (b *builder) system(p string, mode fs.FileMode, content string) {
 	b.add(File{Path: p, Mode: mode, Content: content, Privileged: true})
 }
 
+func (b *builder) systemSeed(p string, mode fs.FileMode, content string) {
+	b.add(File{Path: p, Mode: mode, Content: content, CreateOnly: true, Privileged: true})
+}
+
 func (b *builder) render(f File, name string, data any) {
 	if b.err != nil {
 		return
@@ -135,6 +145,10 @@ func (b *builder) seedTmpl(p string, mode fs.FileMode, name string, data any) {
 
 func (b *builder) systemTmpl(p string, mode fs.FileMode, name string, data any) {
 	b.render(File{Path: p, Mode: mode, Privileged: true}, name, data)
+}
+
+func (b *builder) systemSeedTmpl(p string, mode fs.FileMode, name string, data any) {
+	b.render(File{Path: p, Mode: mode, CreateOnly: true, Privileged: true}, name, data)
 }
 
 func (b *builder) env(a *answers.Answers) {
@@ -162,7 +176,7 @@ func boolString(v bool) string {
 	return "false"
 }
 
-func dnsEnv(a *answers.Answers) []string {
+func sortedDNSVars(a *answers.Answers) []answers.DNSVar {
 	vars := a.DNSVars()
 	if _, known := answers.FindDNSProvider(a.TLS.Provider); !known {
 		sort.SliceStable(vars, func(i, j int) bool {
@@ -172,19 +186,47 @@ func dnsEnv(a *answers.Answers) []string {
 			return vars[i].Name < vars[j].Name
 		})
 	}
+	return vars
+}
+
+func dnsVarValue(a *answers.Answers, v answers.DNSVar) string {
+	val := a.TLS.Vars[v.Name]
+	if val == "" {
+		val = v.Default
+	}
+	return val
+}
+
+func dnsEnv(a *answers.Answers) []string {
 	var env []string
-	for _, v := range vars {
+	for _, v := range sortedDNSVars(a) {
 		if v.Secret {
 			env = append(env, v.Name+"="+ref(v.Name))
 			continue
 		}
-		val := a.TLS.Vars[v.Name]
-		if val == "" {
-			val = v.Default
-		}
-		env = append(env, v.Name+"="+val)
+		env = append(env, v.Name+"="+dnsVarValue(a, v))
 	}
 	return env
+}
+
+func dnsUnitEnv(a *answers.Answers) []string {
+	var env []string
+	for _, v := range sortedDNSVars(a) {
+		if v.Secret {
+			continue
+		}
+		env = append(env, SystemdQuote(v.Name+"="+dnsVarValue(a, v)))
+	}
+	return env
+}
+
+func hasSecretDNSVars(a *answers.Answers) bool {
+	for _, v := range a.DNSVars() {
+		if v.Secret {
+			return true
+		}
+	}
+	return false
 }
 
 type crowdsecView struct {
@@ -193,28 +235,85 @@ type crowdsecView struct {
 	LogVolume  string
 }
 
+type acquisView struct {
+	Path string
+}
+
+func (b *builder) acquisDocker() {
+	b.tmpl("crowdsec/acquis.yaml", 0o644, "acquis.yaml.tmpl", acquisView{Path: traefikAccessLog})
+}
+
+func (b *builder) acquisNative(a *answers.Answers) {
+	if a.CrowdSec.Mode != answers.CrowdSecInstall {
+		return
+	}
+	b.systemTmpl(CrowdSecAcquisPath, 0o644, "acquis.yaml.tmpl", acquisView{Path: a.Mounts.AccessLogPath})
+}
+
+func crowdsecEnv(a *answers.Answers) []string {
+	if a.CrowdSec.Mode == answers.CrowdSecNone {
+		return nil
+	}
+	env := []string{
+		"CROWDSEC_LAPI_URL=" + a.CrowdSec.LAPIURL,
+		"CROWDSEC_API_KEY=" + ref(answers.SecretCrowdSecAPIKey),
+	}
+	if a.CrowdSec.MachineID != "" {
+		env = append(env,
+			"CROWDSEC_MACHINE_ID="+a.CrowdSec.MachineID,
+			"CROWDSEC_MACHINE_PASSWORD="+ref(answers.SecretCrowdSecMachinePassword),
+		)
+	}
+	if a.CrowdSec.AlertLimit != "" {
+		env = append(env, "CROWDSEC_ALERT_LIMIT="+a.CrowdSec.AlertLimit)
+	}
+	return env
+}
+
 type traefikView struct {
-	Dashboard  bool
-	TLS        bool
-	DNS        bool
-	Network    string
-	SingleFile bool
-	Resolver   string
-	Email      string
-	Provider   string
+	Dashboard   bool
+	TLS         bool
+	DNS         bool
+	Network     string
+	SingleFile  bool
+	Resolver    string
+	Email       string
+	Provider    string
+	APIAddress  string
+	Ping        bool
+	DynamicFile string
+	DynamicDir  string
+	AcmeStorage string
+	AccessLog   string
 }
 
 func newTraefikView(a *answers.Answers) traefikView {
 	return traefikView{
-		Dashboard:  a.Dashboard,
-		TLS:        a.TLS.Method != answers.TLSNone,
-		DNS:        a.TLS.Method == answers.TLSDNS,
-		Network:    a.Network.Name,
-		SingleFile: a.Config.Layout == answers.LayoutSingle,
-		Resolver:   answers.CertResolver,
-		Email:      a.TLS.Email,
-		Provider:   a.TLS.ProviderID(),
+		Dashboard:   a.Dashboard,
+		TLS:         a.TLS.Method != answers.TLSNone,
+		DNS:         a.TLS.Method == answers.TLSDNS,
+		Network:     a.Network.Name,
+		SingleFile:  a.Config.Layout == answers.LayoutSingle,
+		Resolver:    answers.CertResolver,
+		Email:       a.TLS.Email,
+		Provider:    a.TLS.ProviderID(),
+		DynamicFile: "/etc/traefik/config/dynamic.yml",
+		DynamicDir:  "/etc/traefik/config",
+		AcmeStorage: "/acme.json",
+		AccessLog:   "/logs/access.log",
 	}
+}
+
+func newNativeTraefikView(a *answers.Answers) traefikView {
+	v := newTraefikView(a)
+	v.Network = ""
+	v.APIAddress = "127.0.0.1:" + a.Network.TraefikAPIPort
+	v.Ping = true
+	v.DynamicFile = a.Config.Path
+	v.DynamicDir = a.Config.Dir
+	v.AcmeStorage = answers.NativeAcmePath
+	v.AccessLog = answers.DefaultAccessLogPath
+	return v
 }
 
 func tlsLabel(router string, on bool) []string {
