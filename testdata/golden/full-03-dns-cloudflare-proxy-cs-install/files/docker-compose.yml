@@ -61,6 +61,7 @@ services:
       - CROWDSEC_API_KEY=${CROWDSEC_API_KEY}
       - CROWDSEC_MACHINE_ID=traefik-manager
       - CROWDSEC_MACHINE_PASSWORD=${CROWDSEC_MACHINE_PASSWORD}
+      - CROWDSEC_ALERT_LIMIT=2500
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.traefik-manager.rule=Host(`manager.example.com`)"
@@ -89,7 +90,7 @@ services:
     networks:
       - traefik-net
     environment:
-      - BOUNCER_KEY_traefik-manager=${CROWDSEC_API_KEY}
+      - BOUNCER_KEY_traefikmanager=${CROWDSEC_API_KEY}
       - COLLECTIONS=crowdsecurity/traefik
     volumes:
       - crowdsec_data:/var/lib/crowdsec/data

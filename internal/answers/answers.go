@@ -18,6 +18,7 @@ type Mode string
 
 const (
 	ModeFull               Mode = "full"
+	ModeFullNative         Mode = "full-native"
 	ModeTMDocker           Mode = "tm-docker"
 	ModeTMNative           Mode = "tm-native"
 	ModeAgentDocker        Mode = "agent-docker"
@@ -25,7 +26,7 @@ const (
 	ModeAgentBinary        Mode = "agent-binary"
 )
 
-var Modes = []Mode{ModeFull, ModeTMDocker, ModeTMNative, ModeAgentDocker, ModeAgentDockerTraefik, ModeAgentBinary}
+var Modes = []Mode{ModeFull, ModeFullNative, ModeTMDocker, ModeTMNative, ModeAgentDocker, ModeAgentDockerTraefik, ModeAgentBinary}
 
 func (m Mode) Valid() bool {
 	for _, k := range Modes {
@@ -45,17 +46,26 @@ func (m Mode) IsAgent() bool {
 }
 
 func (m Mode) IsSystemd() bool {
-	return m == ModeTMNative || m == ModeAgentBinary
+	return m == ModeFullNative || m == ModeTMNative || m == ModeAgentBinary
 }
 
 func (m Mode) HasTraefik() bool {
-	return m == ModeFull || m == ModeAgentDockerTraefik
+	return m == ModeFull || m == ModeFullNative || m == ModeAgentDockerTraefik
+}
+
+func (m Mode) CrowdSecLAPIURL() string {
+	if m.IsSystemd() {
+		return NativeLAPIURL
+	}
+	return DefaultLAPIURL
 }
 
 func (m Mode) Label() string {
 	switch m {
 	case ModeFull:
 		return "Traefik + Traefik Manager (full stack)"
+	case ModeFullNative:
+		return "Traefik + Traefik Manager (Linux services)"
 	case ModeTMDocker:
 		return "Traefik Manager only (Docker)"
 	case ModeTMNative:
@@ -149,9 +159,10 @@ type Restart struct {
 }
 
 type CrowdSec struct {
-	Mode      string `yaml:"mode"`
-	LAPIURL   string `yaml:"lapi_url,omitempty"`
-	MachineID string `yaml:"machine_id,omitempty"`
+	Mode       string `yaml:"mode"`
+	LAPIURL    string `yaml:"lapi_url,omitempty"`
+	MachineID  string `yaml:"machine_id,omitempty"`
+	AlertLimit string `yaml:"alert_limit,omitempty"`
 }
 
 type Network struct {
@@ -223,6 +234,16 @@ const (
 	DefaultSocketProxyHost  = "tcp://socket-proxy:2375"
 	AgentBinaryPath         = "/usr/local/bin/tma"
 	AgentConfigPathTraefik  = "/etc/traefik/config"
+	TraefikBinaryPath       = "/usr/local/bin/traefik"
+	NativeTraefikConfigDir  = "/etc/traefik"
+	NativeTraefikDynamicDir = "/etc/traefik/dynamic"
+	NativeTraefikStateDir   = "/var/lib/traefik"
+	NativeTraefikLogDir     = "/var/log/traefik"
+	NativeAcmePath          = "/var/lib/traefik/acme.json"
+	NativeDynamicPath       = "/etc/traefik/dynamic/dynamic.yml"
+	NativeLAPIURL           = "http://127.0.0.1:8080"
+	NativeLAPIPort          = "8080"
+	CrowdSecMachineID       = "traefik-manager"
 )
 
 func homeDir() string {
@@ -264,11 +285,18 @@ func Defaults(mode Mode) *Answers {
 	switch mode {
 	case ModeFull:
 		a.Dir = filepath.Join(homeDir(), "traefik-stack")
+	case ModeFullNative:
+		a.Config.Path = NativeDynamicPath
+		a.Config.Dir = NativeTraefikDynamicDir
+		a.Mounts.AcmePath = NativeAcmePath
+		a.Restart.SignalFile = DefaultNativeSignalFile
+		a.CrowdSec.LAPIURL = NativeLAPIURL
 	case ModeTMDocker:
 		a.Dir = filepath.Join(homeDir(), "traefik-manager")
 		a.Network.External = true
 	case ModeTMNative:
 		a.Restart.SignalFile = DefaultNativeSignalFile
+		a.CrowdSec.LAPIURL = NativeLAPIURL
 	case ModeAgentDocker:
 		a.Dir = "/opt/traefik-manager-agent"
 		a.Mounts.AccessLogs = false
@@ -279,6 +307,7 @@ func Defaults(mode Mode) *Answers {
 	case ModeAgentBinary:
 		a.Mounts.AccessLogs = false
 		a.Mounts.Certs = false
+		a.CrowdSec.LAPIURL = NativeLAPIURL
 	}
 	return a
 }
@@ -349,13 +378,28 @@ func (a *Answers) Finalize() {
 			a.Restart.Method = RestartNone
 		}
 		a.Restart.Container = "traefik"
-		if a.CrowdSec.Mode == CrowdSecInstall {
-			a.CrowdSec.LAPIURL = DefaultLAPIURL
-			a.CrowdSec.MachineID = "traefik-manager"
-			a.Mounts.AccessLogs = true
-		}
-		if a.CrowdSec.Mode == CrowdSecNone {
-			a.CrowdSec.MachineID = ""
+	case ModeFullNative:
+		a.Hosts.Manager = ""
+		a.Native.ServiceUser = true
+		a.Network.Name = ""
+		a.Config.Path = NativeDynamicPath
+		a.Config.Dir = NativeTraefikDynamicDir
+		a.Mounts.AccessLogs = true
+		a.Mounts.AccessLogPath = DefaultAccessLogPath
+		a.Mounts.Certs = a.TLS.Method != TLSNone
+		a.Mounts.AcmePath = NativeAcmePath
+		a.Mounts.StaticConfigPath = DefaultStaticConfigPath
+		a.Mounts.Plugins = false
+		if a.Mounts.StaticConfig {
+			a.Restart.Method = RestartPoisonPill
+			a.Restart.TraefikSystemd = true
+			a.Restart.TraefikService = "traefik"
+			if a.Restart.SignalFile == "" {
+				a.Restart.SignalFile = DefaultNativeSignalFile
+			}
+		} else {
+			a.Restart.Method = RestartNone
+			a.Restart.TraefikSystemd = false
 		}
 	case ModeTMDocker:
 		if a.TLS.Method == TLSDNS {
@@ -376,7 +420,6 @@ func (a *Answers) Finalize() {
 		if !a.Mounts.StaticConfig {
 			a.Restart.Method = RestartNone
 		}
-		a.CrowdSec = CrowdSec{Mode: CrowdSecNone}
 	case ModeTMNative:
 		if !a.Mounts.StaticConfig {
 			a.Restart.Method = RestartNone
@@ -385,7 +428,6 @@ func (a *Answers) Finalize() {
 		if a.Restart.TraefikSystemd {
 			a.Restart.Method = RestartPoisonPill
 		}
-		a.CrowdSec = CrowdSec{Mode: CrowdSecNone}
 	case ModeAgentDockerTraefik:
 		a.Agent.TraefikURL = "http://traefik:" + a.Network.TraefikAPIPort
 		a.Agent.ConfigPath = AgentConfigPathTraefik
@@ -410,17 +452,8 @@ func (a *Answers) Finalize() {
 			a.Restart.DockerHost = DefaultSocketProxyHost
 		}
 	}
+	a.finalizeCrowdSec()
 	if a.Mode.IsAgent() {
-		if a.CrowdSec.Mode == CrowdSecInstall {
-			a.CrowdSec.LAPIURL = DefaultLAPIURL
-			if !a.Mounts.AccessLogs {
-				a.Mounts.AccessLogs = true
-				if a.Mounts.AccessLogPath == "" {
-					a.Mounts.AccessLogPath = DefaultAccessLogPath
-				}
-			}
-		}
-		a.CrowdSec.MachineID = ""
 		if !a.Agent.Git.Enabled {
 			a.Agent.Git.Repo = ""
 			a.Agent.Git.User = ""
@@ -434,6 +467,30 @@ func (a *Answers) Finalize() {
 	}
 	if a.Mode.IsDocker() && a.Dir != "" {
 		a.Dir = expandHome(a.Dir)
+	}
+}
+
+func (a *Answers) finalizeCrowdSec() {
+	switch a.CrowdSec.Mode {
+	case CrowdSecInstall:
+		a.CrowdSec.LAPIURL = a.Mode.CrowdSecLAPIURL()
+		a.Mounts.AccessLogs = true
+		if a.Mounts.AccessLogPath == "" {
+			a.Mounts.AccessLogPath = DefaultAccessLogPath
+		}
+	case CrowdSecConnect:
+		if a.CrowdSec.LAPIURL == "" {
+			a.CrowdSec.LAPIURL = a.Mode.CrowdSecLAPIURL()
+		}
+	case CrowdSecNone:
+		a.CrowdSec.AlertLimit = ""
+	}
+	if a.Mode.IsAgent() || a.CrowdSec.Mode == CrowdSecNone {
+		a.CrowdSec.MachineID = ""
+		return
+	}
+	if a.CrowdSec.Mode == CrowdSecInstall {
+		a.CrowdSec.MachineID = CrowdSecMachineID
 	}
 }
 
@@ -486,6 +543,21 @@ func (a *Answers) Validate() error {
 	if err := oneOf("crowdsec.mode", a.CrowdSec.Mode, CrowdSecNone, CrowdSecInstall, CrowdSecConnect); err != nil {
 		return err
 	}
+	if a.CrowdSec.AlertLimit != "" {
+		n, err := strconv.Atoi(a.CrowdSec.AlertLimit)
+		if err != nil || n < 0 || n > 100000 {
+			return fmt.Errorf("crowdsec.alert_limit must be a number from 0 to 100000, got %q", a.CrowdSec.AlertLimit)
+		}
+	}
+	if a.CrowdSec.Mode == CrowdSecInstall && a.Mounts.AccessLogPath == "" {
+		return fmt.Errorf("mounts.access_log_path is required when crowdsec.mode is install: crowdsec has nothing to read otherwise")
+	}
+	if a.CrowdSec.Mode == CrowdSecConnect && a.CrowdSec.LAPIURL == "" {
+		return fmt.Errorf("crowdsec.lapi_url is required")
+	}
+	if err := a.crowdSecPortConflict(); err != nil {
+		return err
+	}
 	if a.TLS.Method != TLSNone && a.TLS.Email == "" && a.Mode != ModeTMDocker {
 		return fmt.Errorf("tls.email is required for Let's Encrypt")
 	}
@@ -531,8 +603,33 @@ func (a *Answers) Validate() error {
 		if a.Network.Name == "" {
 			return fmt.Errorf("network.name is required")
 		}
-		if a.CrowdSec.Mode == CrowdSecConnect && a.CrowdSec.LAPIURL == "" {
-			return fmt.Errorf("crowdsec.lapi_url is required")
+	case ModeFullNative:
+		if err := oneOf("deployment", a.Deployment, DeploymentExternal, DeploymentInternal); err != nil {
+			return err
+		}
+		if a.Native.InstallDir == "" || a.Native.DataDir == "" {
+			return fmt.Errorf("native.install_dir and native.data_dir are required")
+		}
+		if err := port("native.port", a.Native.Port); err != nil {
+			return err
+		}
+		if err := port("network.traefik_api_port", a.Network.TraefikAPIPort); err != nil {
+			return err
+		}
+		if a.TLS.Method != TLSNone {
+			if a.Domain == "" {
+				return fmt.Errorf("domain is required when TLS is on")
+			}
+			if a.Hosts.Dashboard == "" {
+				return fmt.Errorf("hosts.dashboard is required when TLS is on")
+			}
+		}
+		if a.CrowdSec.Mode == CrowdSecConnect {
+			for _, local := range []string{"http://127.0.0.1:", "http://localhost:"} {
+				if strings.TrimRight(a.CrowdSec.LAPIURL, "/") == local+a.Network.TraefikAPIPort {
+					return fmt.Errorf("crowdsec.lapi_url %s collides with the Traefik API port: change network.traefik_api_port", a.CrowdSec.LAPIURL)
+				}
+			}
 		}
 	case ModeTMDocker:
 		if a.TLS.Method == TLSDNS {
@@ -585,9 +682,6 @@ func (a *Answers) Validate() error {
 		if a.Mode == ModeAgentDocker && a.Dir == "" {
 			return fmt.Errorf("dir is required")
 		}
-		if a.Mode == ModeAgentBinary && a.CrowdSec.Mode == CrowdSecInstall {
-			return fmt.Errorf("crowdsec.mode install is not available for the binary agent")
-		}
 	case ModeAgentDockerTraefik:
 		if err := oneOf("deployment", a.Deployment, DeploymentExternal, DeploymentInternal); err != nil {
 			return err
@@ -603,14 +697,40 @@ func (a *Answers) Validate() error {
 		}
 	}
 	if a.Mode.IsAgent() {
-		if a.CrowdSec.Mode == CrowdSecConnect && a.CrowdSec.LAPIURL == "" {
-			return fmt.Errorf("crowdsec.lapi_url is required")
-		}
 		if a.Agent.Git.Enabled && a.Agent.Git.Repo == "" {
 			return fmt.Errorf("agent.git.repo is required when git backup is enabled")
 		}
 	}
 	return nil
+}
+
+func (a *Answers) crowdSecPortConflict() error {
+	if a.CrowdSec.Mode != CrowdSecInstall || !a.Mode.IsSystemd() {
+		return nil
+	}
+	switch a.Mode {
+	case ModeFullNative:
+		if a.Network.TraefikAPIPort == NativeLAPIPort {
+			return fmt.Errorf("network.traefik_api_port %s is the port the CrowdSec LAPI listens on: change network.traefik_api_port", NativeLAPIPort)
+		}
+	case ModeTMNative:
+		if a.Native.Port == NativeLAPIPort {
+			return fmt.Errorf("native.port %s is the port the CrowdSec LAPI listens on: change native.port", NativeLAPIPort)
+		}
+	case ModeAgentBinary:
+		if a.Agent.Port == NativeLAPIPort {
+			return fmt.Errorf("agent.port %s is the port the CrowdSec LAPI listens on: change agent.port", NativeLAPIPort)
+		}
+		if isLocalLAPIAddress(a.Agent.TraefikURL) {
+			return fmt.Errorf("agent.traefik_url %s is the address the CrowdSec LAPI listens on: move the Traefik API to another port", a.Agent.TraefikURL)
+		}
+	}
+	return nil
+}
+
+func isLocalLAPIAddress(url string) bool {
+	u := strings.TrimRight(url, "/")
+	return u == NativeLAPIURL || u == "http://localhost:"+NativeLAPIPort
 }
 
 var (
@@ -767,10 +887,10 @@ func (a *Answers) validatePaths() error {
 		{"mounts.static_config_path", a.Mounts.StaticConfigPath, a.Mounts.StaticConfig && !a.Mode.HasTraefik()},
 		{"mounts.plugins_dir", a.Mounts.PluginsDir, a.Mounts.Plugins},
 		{"restart.signal_file", a.Restart.SignalFile, a.Mounts.StaticConfig && a.Restart.Method == RestartPoisonPill && a.Mode != ModeFull},
-		{"config.path", a.Config.Path, a.Mode == ModeTMNative && a.Config.Layout == LayoutSingle},
-		{"config.dir", a.Config.Dir, a.Mode == ModeTMNative && a.Config.Layout == LayoutDirectory},
-		{"native.install_dir", a.Native.InstallDir, a.Mode == ModeTMNative},
-		{"native.data_dir", a.Native.DataDir, a.Mode == ModeTMNative},
+		{"config.path", a.Config.Path, (a.Mode == ModeTMNative || a.Mode == ModeFullNative) && a.Config.Layout == LayoutSingle},
+		{"config.dir", a.Config.Dir, (a.Mode == ModeTMNative || a.Mode == ModeFullNative) && a.Config.Layout == LayoutDirectory},
+		{"native.install_dir", a.Native.InstallDir, a.Mode == ModeTMNative || a.Mode == ModeFullNative},
+		{"native.data_dir", a.Native.DataDir, a.Mode == ModeTMNative || a.Mode == ModeFullNative},
 		{"agent.config_path", a.Agent.ConfigPath, a.Mode == ModeAgentDocker || a.Mode == ModeAgentBinary},
 		{"dir", a.Dir, a.Mode.IsDocker()},
 	}
@@ -907,12 +1027,12 @@ func (a *Answers) SecretSpecs() []SecretSpec {
 	switch a.CrowdSec.Mode {
 	case CrowdSecInstall:
 		specs = append(specs, SecretSpec{Key: SecretCrowdSecAPIKey, Prompt: "CrowdSec bouncer key", Generated: true, Bytes: 32})
-		if a.Mode == ModeFull {
+		if !a.Mode.IsAgent() {
 			specs = append(specs, SecretSpec{Key: SecretCrowdSecMachinePassword, Prompt: "CrowdSec machine password", Generated: true, Bytes: 24})
 		}
 	case CrowdSecConnect:
 		specs = append(specs, SecretSpec{Key: SecretCrowdSecAPIKey, Prompt: "CrowdSec API key (bouncer, for decisions)", Required: true})
-		if a.Mode == ModeFull && a.CrowdSec.MachineID != "" {
+		if !a.Mode.IsAgent() && a.CrowdSec.MachineID != "" {
 			specs = append(specs, SecretSpec{Key: SecretCrowdSecMachinePassword, Prompt: "CrowdSec machine password", Required: true})
 		}
 	}
@@ -982,10 +1102,12 @@ func (a *Answers) Sections() []string {
 	switch a.Mode {
 	case ModeFull:
 		return []string{"dir", "deployment", "domain", "hosts", "dashboard", "tls", "config", "mounts", "restart", "crowdsec", "network"}
+	case ModeFullNative:
+		return []string{"native", "deployment", "domain", "hosts", "dashboard", "tls", "config", "mounts", "restart", "crowdsec", "network"}
 	case ModeTMDocker:
-		return []string{"dir", "hosts", "tls", "config", "mounts", "restart", "network", "access"}
+		return []string{"dir", "hosts", "tls", "config", "mounts", "restart", "crowdsec", "network", "access"}
 	case ModeTMNative:
-		return []string{"native", "config", "mounts", "restart"}
+		return []string{"native", "config", "mounts", "restart", "crowdsec"}
 	case ModeAgentDocker:
 		return []string{"dir", "agent", "mounts", "restart", "crowdsec"}
 	case ModeAgentDockerTraefik:

@@ -1,6 +1,8 @@
 package wizard
 
 import (
+	"errors"
+	"strconv"
 	"strings"
 
 	"charm.land/huh/v2"
@@ -9,6 +11,11 @@ import (
 )
 
 const (
+	crowdsecInfo      = "CrowdSec detects intrusions and bans malicious IPs. Visible in the CrowdSec tab in Traefik Manager."
+	crowdsecNoBouncer = "tm does not attach the CrowdSec bouncer to Traefik, so decisions are visible but not enforced yet."
+
+	nativeInstallLabel = "Install on this server (CrowdSec package)"
+
 	layoutInfo = "Single file is simpler. Directory (one .yml per service) is easier at scale."
 	mountsInfo = "Expose extra Traefik data to Traefik Manager for richer visibility."
 	agentPaths = "Expose extra Traefik data to the agent for richer visibility."
@@ -144,11 +151,26 @@ func (w *wizard) fullMounts() error {
 	return w.restartMethodDocker(false)
 }
 
-func (w *wizard) fullCrowdSec() error {
+func alertLimitInput(a *answers.Answers) *huh.Input {
+	return input("Alert limit (empty keeps the default of 500)", &a.CrowdSec.AlertLimit).
+		Description("How many alerts the CrowdSec tab fetches from the LAPI, 0 to 100000.").
+		Validate(func(v string) error {
+			v = strings.TrimSpace(v)
+			if v == "" {
+				return nil
+			}
+			n, err := strconv.Atoi(v)
+			if err != nil || n < 0 || n > 100000 {
+				return errors.New("a number from 0 to 100000, or empty for the default")
+			}
+			return nil
+		})
+}
+
+func (w *wizard) crowdSecManager(installLabel string, askLogPath bool, check func(string) error) error {
 	a := w.a
 	add := a.CrowdSec.Mode != answers.CrowdSecNone
-	err := w.groups(huh.NewGroup(confirm("Add CrowdSec?", &add)).
-		Description("CrowdSec detects intrusions and bans malicious IPs. Visible in the CrowdSec tab in Traefik Manager."))
+	err := w.groups(huh.NewGroup(confirm("Add CrowdSec?", &add)).Description(crowdsecInfo))
 	if err != nil {
 		return err
 	}
@@ -157,34 +179,61 @@ func (w *wizard) fullCrowdSec() error {
 		return nil
 	}
 	err = w.form(selectOne("CrowdSec setup", &a.CrowdSec.Mode,
-		huh.NewOption("Install as part of this stack", answers.CrowdSecInstall),
+		huh.NewOption(installLabel, answers.CrowdSecInstall),
 		huh.NewOption("Connect to existing instance", answers.CrowdSecConnect),
 	))
 	if err != nil {
 		return err
 	}
 	if a.CrowdSec.Mode == answers.CrowdSecConnect {
-		a.CrowdSec.LAPIURL = orDefault(a.CrowdSec.LAPIURL, answers.DefaultLAPIURL)
-		err = w.form(
-			requiredInput("CrowdSec LAPI URL", &a.CrowdSec.LAPIURL, "a lapi url is required"),
-			w.secret(answers.SecretCrowdSecAPIKey, "CrowdSec API key (bouncer, for decisions)", "a crowdsec api key is required"),
-			input("CrowdSec machine ID (optional, for alerts)", &a.CrowdSec.MachineID).
-				Description("Machine credentials are needed to view alerts and unban (the bouncer key cannot). Create one with: cscli machines add traefik-manager --auto"),
-		)
-		if err != nil {
+		return w.crowdsecConnectManager(a.Mode.CrowdSecLAPIURL(), check)
+	}
+	if askLogPath {
+		a.Mounts.AccessLogPath = orDefault(a.Mounts.AccessLogPath, answers.DefaultAccessLogPath)
+		if err := w.form(pathInput("Path to the Traefik access log", &a.Mounts.AccessLogPath)); err != nil {
 			return err
 		}
-		if a.CrowdSec.MachineID != "" {
-			if err := w.form(w.secret(answers.SecretCrowdSecMachinePassword, "CrowdSec machine password", "a machine password is required when a machine id is set")); err != nil {
-				return err
-			}
-		}
 	}
-	if a.CrowdSec.Mode == answers.CrowdSecInstall && !a.Mounts.AccessLogs {
+	if !a.Mounts.AccessLogs {
 		w.u.Warn("CrowdSec reads Traefik access logs - enabling access log mount.")
 		a.Mounts.AccessLogs = true
 	}
-	return nil
+	w.u.Info(crowdsecNoBouncer)
+	return w.form(alertLimitInput(a))
+}
+
+func (w *wizard) fullCrowdSec() error {
+	return w.crowdSecManager("Install as part of this stack", false, nil)
+}
+
+func (w *wizard) tmdCrowdSec() error {
+	return w.crowdSecManager("Install alongside Traefik Manager (container)", true, nil)
+}
+
+func (w *wizard) tmnCrowdSec() error {
+	return w.crowdSecManager(nativeInstallLabel, true, nil)
+}
+
+func (w *wizard) crowdsecConnectManager(defaultLAPI string, check func(string) error) error {
+	a := w.a
+	a.CrowdSec.LAPIURL = orDefault(a.CrowdSec.LAPIURL, defaultLAPI)
+	if check == nil {
+		check = nonEmpty("a lapi url is required")
+	}
+	err := w.form(
+		checkedInput("CrowdSec LAPI URL", &a.CrowdSec.LAPIURL, check),
+		w.secret(answers.SecretCrowdSecAPIKey, "CrowdSec API key (bouncer, for decisions)", "a crowdsec api key is required"),
+		input("CrowdSec machine ID (optional, for alerts)", &a.CrowdSec.MachineID).
+			Description("Machine credentials are needed to view alerts and unban (the bouncer key cannot). Create one with: cscli machines add traefik-manager --auto"),
+		alertLimitInput(a),
+	)
+	if err != nil {
+		return err
+	}
+	if a.CrowdSec.MachineID == "" {
+		return nil
+	}
+	return w.form(w.secret(answers.SecretCrowdSecMachinePassword, "CrowdSec machine password", "a machine password is required when a machine id is set"))
 }
 
 func (w *wizard) fullNetwork() error {
@@ -193,6 +242,79 @@ func (w *wizard) fullNetwork() error {
 		requiredInput("Docker network name", &a.Network.Name, "a network name is required"),
 		portInput("Traefik internal API port", &a.Network.TraefikAPIPort),
 	)
+}
+
+func (w *wizard) fnoGeneral() error {
+	a := w.a
+	return w.form(
+		pathInput("Install directory", &a.Native.InstallDir),
+		pathInput("Data directory", &a.Native.DataDir),
+		portInput("Traefik Manager port", &a.Native.Port),
+		portInput("Traefik internal API port", &a.Network.TraefikAPIPort),
+	)
+}
+
+func (w *wizard) fnoDomain() error {
+	a := w.a
+	old := a.Domain
+	domain := input("Your domain (e.g. example.com)", &a.Domain).
+		Description("Used for the Traefik dashboard route. Leave empty to skip it.")
+	if a.TLS.Method != answers.TLSNone {
+		domain = requiredInput("Your domain (e.g. example.com)", &a.Domain, "a domain is required")
+	}
+	if err := w.form(domain); err != nil {
+		return err
+	}
+	if a.Domain == "" {
+		a.Hosts.Dashboard = ""
+		return w.form(confirm("Enable Traefik API dashboard UI?", &a.Dashboard))
+	}
+	if a.Hosts.Dashboard == "" || (old != "" && a.Hosts.Dashboard == "traefik."+old) {
+		a.Hosts.Dashboard = "traefik." + a.Domain
+	}
+	return w.form(
+		requiredInput("Traefik dashboard subdomain", &a.Hosts.Dashboard, "a hostname is required"),
+		confirm("Enable Traefik API dashboard UI?", &a.Dashboard),
+	)
+}
+
+func (w *wizard) fnoMounts() error {
+	return w.groups(huh.NewGroup(confirm("Enable the static config editor (traefik.yml)?", &w.a.Mounts.StaticConfig)).
+		Description("Lets Traefik Manager edit " + answers.DefaultStaticConfigPath + " and restart Traefik after saving."))
+}
+
+func (w *wizard) fnoCrowdSec() error {
+	a := w.a
+	err := w.crowdSecManager(nativeInstallLabel, false, func(s string) error {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			return errors.New("a lapi url is required")
+		}
+		for _, local := range []string{"http://127.0.0.1:", "http://localhost:"} {
+			if strings.TrimRight(s, "/") == local+a.Network.TraefikAPIPort {
+				return errors.New("port " + a.Network.TraefikAPIPort + " is the Traefik API port on this install, use the port your LAPI listens on")
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	if a.CrowdSec.Mode != answers.CrowdSecInstall || a.Network.TraefikAPIPort != answers.NativeLAPIPort {
+		return nil
+	}
+	w.u.Warn("CrowdSec listens on 127.0.0.1:" + answers.NativeLAPIPort + ", which is this install's Traefik API port.")
+	return w.form(checkedInput("Traefik internal API port", &a.Network.TraefikAPIPort, freeOfLAPI))
+}
+
+func freeOfLAPI(s string) error {
+	if err := validPort(s); err != nil {
+		return err
+	}
+	if strings.TrimSpace(s) == answers.NativeLAPIPort {
+		return errors.New("port " + answers.NativeLAPIPort + " is taken by the CrowdSec LAPI, choose another")
+	}
+	return nil
 }
 
 func (w *wizard) tmdGeneral() error {
@@ -458,17 +580,21 @@ func (w *wizard) agentRestart() error {
 
 func (w *wizard) agentCrowdSec() error {
 	a := w.a
-	opts := []huh.Option[string]{huh.NewOption("None", answers.CrowdSecNone)}
-	if a.Mode != answers.ModeAgentBinary {
-		opts = append(opts, huh.NewOption("Install alongside agent", answers.CrowdSecInstall))
+	installLabel := "Install alongside agent"
+	if a.Mode == answers.ModeAgentBinary {
+		installLabel = nativeInstallLabel
 	}
-	opts = append(opts, huh.NewOption("Connect to existing instance", answers.CrowdSecConnect))
+	opts := []huh.Option[string]{
+		huh.NewOption("None", answers.CrowdSecNone),
+		huh.NewOption(installLabel, answers.CrowdSecInstall),
+		huh.NewOption("Connect to existing instance", answers.CrowdSecConnect),
+	}
 	if err := w.form(selectOne("CrowdSec integration", &a.CrowdSec.Mode, opts...)); err != nil {
 		return err
 	}
 	switch a.CrowdSec.Mode {
 	case answers.CrowdSecInstall:
-		a.CrowdSec.LAPIURL = answers.DefaultLAPIURL
+		a.CrowdSec.LAPIURL = a.Mode.CrowdSecLAPIURL()
 		if !a.Mounts.AccessLogs {
 			w.u.Warn("CrowdSec reads Traefik access logs - enabling access log mount.")
 			a.Mounts.AccessLogs = true
@@ -477,12 +603,14 @@ func (w *wizard) agentCrowdSec() error {
 				return err
 			}
 		}
-		w.u.OK("CrowdSec will be installed alongside the agent")
+		w.u.Info(crowdsecNoBouncer)
+		return w.form(alertLimitInput(a))
 	case answers.CrowdSecConnect:
-		a.CrowdSec.LAPIURL = orDefault(a.CrowdSec.LAPIURL, answers.DefaultLAPIURL)
+		a.CrowdSec.LAPIURL = orDefault(a.CrowdSec.LAPIURL, a.Mode.CrowdSecLAPIURL())
 		return w.form(
 			requiredInput("LAPI URL", &a.CrowdSec.LAPIURL, "a lapi url is required"),
 			w.secret(answers.SecretCrowdSecAPIKey, "API key", "a crowdsec api key is required"),
+			alertLimitInput(a),
 		)
 	}
 	return nil

@@ -17,6 +17,7 @@ restart:
   method: proxy
 crowdsec:
   mode: install
+  alert_limit: "2500"
 network:
   name: traefik-net
   traefik_api_port: "8080"

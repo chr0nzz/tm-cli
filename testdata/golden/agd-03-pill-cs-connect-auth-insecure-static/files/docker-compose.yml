@@ -20,6 +20,7 @@ services:
       - ACME_JSON_PATH=/etc/traefik/acme.json
       - CROWDSEC_LAPI_URL=http://10.0.0.9:8080
       - CROWDSEC_API_KEY=${CROWDSEC_API_KEY}
+      - CROWDSEC_ALERT_LIMIT=2500
     volumes:
       - /app/config:/app/config
       - ./backups:/app/backups

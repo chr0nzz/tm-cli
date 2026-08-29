@@ -94,15 +94,14 @@ func agentEnv(a *answers.Answers, p agentPaths, compose bool) []envVar {
 	if p.Plugins != "" {
 		add("PLUGINS_DIR", p.Plugins)
 	}
-	switch a.CrowdSec.Mode {
-	case answers.CrowdSecInstall:
-		add("CROWDSEC_LAPI_URL", crowdsecLAPIURL)
-		secret(answers.SecretCrowdSecAPIKey)
-	case answers.CrowdSecConnect:
+	if a.CrowdSec.Mode != answers.CrowdSecNone {
 		if a.CrowdSec.LAPIURL != "" {
 			add("CROWDSEC_LAPI_URL", a.CrowdSec.LAPIURL)
 		}
 		secret(answers.SecretCrowdSecAPIKey)
+	}
+	if a.CrowdSec.Mode != answers.CrowdSecNone && a.CrowdSec.AlertLimit != "" {
+		add("CROWDSEC_ALERT_LIMIT", a.CrowdSec.AlertLimit)
 	}
 	if a.Agent.Git.Enabled {
 		add("GIT_BACKUP_ENABLED", "true")
@@ -193,7 +192,7 @@ func renderAgentDocker(a *answers.Answers) (*Output, error) {
 	b.tmpl("docker-compose.yml", 0o644, "compose-agent.tmpl", v)
 	b.env(a)
 	if install {
-		b.tmpl("crowdsec/acquis.yaml", 0o644, "acquis.yaml.tmpl", nil)
+		b.acquisDocker()
 	}
 	return b.result()
 }
@@ -296,14 +295,14 @@ func renderAgentDockerTraefik(a *answers.Answers) (*Output, error) {
 	b.env(a)
 	b.tmpl("traefik/traefik.yml", 0o644, "traefik.yml.tmpl", newTraefikView(a))
 	if single {
-		b.seedTmpl("traefik/config/dynamic.yml", 0o644, "dynamic.yml.tmpl", nil)
+		b.seedTmpl("traefik/config/dynamic.yml", 0o644, "dynamic.yml.tmpl", dashboardView{})
 	}
 	b.seed("traefik/logs/access.log", 0o644, "")
 	if tls {
 		b.seed("traefik/acme.json", 0o600, "")
 	}
 	if install {
-		b.tmpl("crowdsec/acquis.yaml", 0o644, "acquis.yaml.tmpl", nil)
+		b.acquisDocker()
 	}
 	return b.result()
 }
@@ -321,7 +320,11 @@ func renderAgentBinary(a *answers.Answers) (*Output, error) {
 	}
 	b := &builder{}
 	b.dir("/etc/traefik-manager-agent")
+	if a.CrowdSec.Mode == answers.CrowdSecInstall {
+		b.dir(CrowdSecAcquisDir)
+	}
 	b.systemTmpl(AgentUnitPath, 0o644, "tma.service.tmpl", agentUnitView{EnvFile: AgentEnvPath, Env: env})
 	b.system(AgentEnvPath, 0o600, EnvFile(a))
+	b.acquisNative(a)
 	return b.result()
 }

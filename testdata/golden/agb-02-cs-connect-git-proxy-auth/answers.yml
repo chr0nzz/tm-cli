@@ -24,6 +24,7 @@ restart:
   docker_host: tcp://127.0.0.1:2375
 crowdsec:
   mode: connect
+  alert_limit: "2500"
   lapi_url: http://127.0.0.1:8080
 secrets:
   TMA_API_KEY: tma-api-key-PLACEHOLDER

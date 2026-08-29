@@ -22,6 +22,7 @@ restart:
   signal_file: /signals/restart.sig
 crowdsec:
   mode: connect
+  alert_limit: "2500"
   lapi_url: http://10.0.0.9:8080
 secrets:
   TMA_API_KEY: tma-api-key-PLACEHOLDER

@@ -38,14 +38,14 @@ func renderFull(a *answers.Answers) (*Output, error) {
 	b.env(a)
 	b.tmpl("traefik/traefik.yml", 0o644, "traefik.yml.tmpl", newTraefikView(a))
 	if single {
-		b.seedTmpl("traefik/config/dynamic.yml", 0o644, "dynamic.yml.tmpl", nil)
+		b.seedTmpl("traefik/config/dynamic.yml", 0o644, "dynamic.yml.tmpl", dashboardView{})
 	} else {
 		b.seedTmpl("traefik/config/example-app.yml.disabled", 0o644, "example-app.yml.tmpl", nil)
 	}
 	b.seed("traefik/acme.json", 0o600, "")
 	b.seed("traefik/logs/access.log", 0o644, "")
 	if install {
-		b.tmpl("crowdsec/acquis.yaml", 0o644, "acquis.yaml.tmpl", nil)
+		b.acquisDocker()
 	}
 	return b.result()
 }
@@ -127,19 +127,7 @@ func newFullView(a *answers.Answers) fullView {
 		v.TMVolumes = append(v.TMVolumes, "./traefik/config:/app/config/dynamic")
 	}
 
-	v.TMEnv = tmEnv(a, static, proxy, pill, single)
-	if a.CrowdSec.Mode != answers.CrowdSecNone {
-		v.TMEnv = append(v.TMEnv,
-			"CROWDSEC_LAPI_URL="+a.CrowdSec.LAPIURL,
-			"CROWDSEC_API_KEY="+ref(answers.SecretCrowdSecAPIKey),
-		)
-		if a.CrowdSec.MachineID != "" {
-			v.TMEnv = append(v.TMEnv,
-				"CROWDSEC_MACHINE_ID="+a.CrowdSec.MachineID,
-				"CROWDSEC_MACHINE_PASSWORD="+ref(answers.SecretCrowdSecMachinePassword),
-			)
-		}
-	}
+	v.TMEnv = append(tmEnv(a, static, proxy, pill, single), crowdsecEnv(a)...)
 
 	v.TMLabels = tmLabels(a)
 
