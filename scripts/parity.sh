@@ -349,8 +349,55 @@ render_agent_binary() {
   install_agent_binary
 }
 
+crowdsec_is_new() {
+  case "${ans_crowdsec_mode:-none}" in
+    none) return 1 ;;
+  esac
+  case "${ans_mode:-}" in
+    tm-docker|tm-native) return 0 ;;
+    agent-binary) [[ "${ans_crowdsec_mode}" == install ]] ;;
+    *) return 1 ;;
+  esac
+}
+
 golden_paths() {
+  if crowdsec_is_new; then
+    grep -vxE '(crowdsec/acquis\.yaml|/etc/crowdsec/acquis\.d/traefik\.yaml|/etc/traefik-manager/env)' \
+      <(awk '{print $1}' "$dir/files.txt")
+    return
+  fi
   awk '{print $1}' "$dir/files.txt"
+}
+
+golden_dirs() {
+  if crowdsec_is_new; then
+    grep -vxE '(crowdsec|/etc/crowdsec/acquis\.d)' "$dir/dirs.txt"
+    return
+  fi
+  cat "$dir/dirs.txt"
+}
+
+strip_crowdsec_compose() {
+  awk '
+    /^  crowdsec:$/ { skip = 1; next }
+    skip && /^  [^ ]/ { skip = 0 }
+    skip { next }
+    /^      - CROWDSEC_/ { next }
+    /^volumes:$/ { pending = $0; next }
+    /^  crowdsec_data:$/ { next }
+    {
+      if (pending != "") {
+        if ($0 ~ /^  [^ ]/) { print pending; pending = "" }
+        else if ($0 !~ /^[[:space:]]*$/) { pending = "" }
+      }
+      print
+    }
+  ' "$1" > "$1.cs" && mv "$1.cs" "$1"
+}
+
+strip_crowdsec_unit() {
+  sed -e '/^Environment="CROWDSEC_/d' -e '\|^EnvironmentFile=/etc/traefik-manager/env$|d' "$1" > "$1.strip"
+  mv "$1.strip" "$1"
 }
 
 normalise() {
@@ -420,6 +467,19 @@ compare_docker_tree() {
         cp "$norm/$rel.tm" "$norm/$rel"
       fi
     fi
+    if [[ "$rel" == docker-compose.yml ]] && crowdsec_is_new; then
+      note_dev "$name: the legacy script never offered crowdsec for ${ans_mode}, its parts of $rel are not diffed"
+      strip_crowdsec_compose "$norm/$rel.tm"
+      strip_crowdsec_compose "$norm/$rel"
+    fi
+    if [[ "$rel" == docker-compose.yml ]] && grep -q 'BOUNCER_KEY_traefik-manager=' "$norm/$rel"; then
+      note_dev "$name: the legacy BOUNCER_KEY_traefik-manager contains a hyphen, so bash never exposed it and the bouncer was never registered, tm uses BOUNCER_KEY_traefikmanager"
+      sed -i 's/BOUNCER_KEY_traefik-manager=/BOUNCER_KEY_traefikmanager=/' "$norm/$rel"
+    fi
+    if [[ "$rel" == docker-compose.yml && -n "${ans_crowdsec_alert_limit:-}" ]] && ! crowdsec_is_new; then
+      note_dev "$name: CROWDSEC_ALERT_LIMIT has no legacy equivalent, the line is dropped before diffing"
+      sed -i '/CROWDSEC_ALERT_LIMIT=/d' "$norm/$rel.tm"
+    fi
     if [[ "$rel" == docker-compose.yml && "${ans_channel:-stable}" == beta ]]; then
       note_dev "$name: the beta image tag has no legacy equivalent, only the tag is normalised"
       sed -i 's|\(image: ghcr.io/chr0nzz/traefik-manager[a-z-]*\):beta|\1:latest|' "$norm/$rel.tm"
@@ -447,7 +507,7 @@ compare_docker_tree() {
     fi
   done < <(find "$out" -type f -printf '%P\n')
   local want have
-  want="$({ cat "$dir/dirs.txt"; golden_paths | grep / | sed 's|/[^/]*$||'; } | ancestors | sort -u)"
+  want="$({ golden_dirs; golden_paths | grep / | sed 's|/[^/]*$||'; } | ancestors | sort -u)"
   have="$(find "$out" -mindepth 1 -type d -printf '%P\n' | sort -u)"
   if [[ "$want" != "$have" ]]; then
     echo "  directory sets differ (tm vs legacy)"
@@ -485,7 +545,7 @@ check_docker_env() {
 }
 
 compare_systemd_tree() {
-  local status=0 path unit_keys env_keys key value var
+  local status=0 path unit_keys env_keys key value var golden_side
   while IFS= read -r path; do
     if [[ "$path" == /etc/traefik-manager-agent/env ]]; then
       continue
@@ -502,6 +562,11 @@ compare_systemd_tree() {
     if [[ "$path" == /etc/systemd/system/tma.service ]]; then
       unit_keys="$(grep -o '^Environment="[A-Z_]*=[$][{][A-Z_]*}"$' "$norm$path" | sed 's/^Environment="//; s/=.*//' | sort)"
       env_keys="$(cut -d= -f1 "$dir/files/etc/traefik-manager-agent/env" | sort)"
+      if crowdsec_is_new; then
+        note_dev "$name: the legacy script never offered a native crowdsec install, its secret keys are left out of the env file check"
+        unit_keys="$(printf '%s\n' "$unit_keys" | grep -v '^CROWDSEC_' || true)"
+        env_keys="$(printf '%s\n' "$env_keys" | grep -v '^CROWDSEC_' || true)"
+      fi
       if [[ "$unit_keys" != "$env_keys" ]]; then
         echo "  secret keys moved to the env file differ from the legacy inline secrets"
         diff <(echo "$unit_keys") <(echo "$env_keys") || true
@@ -519,7 +584,20 @@ compare_systemd_tree() {
       grep -v '^Environment="[A-Z_]*=[$][{][A-Z_]*}"$' "$norm$path" | sed '/^Type=simple$/a EnvironmentFile=/etc/traefik-manager-agent/env' > "$norm$path.tm"
       mv "$norm$path.tm" "$norm$path"
     fi
-    if ! diff -B -u "$dir/files$path" "$norm$path"; then
+    golden_side="$dir/files$path"
+    if [[ -n "${ans_crowdsec_alert_limit:-}" ]] && ! crowdsec_is_new && grep -q 'CROWDSEC_ALERT_LIMIT=' "$golden_side"; then
+      note_dev "$name: CROWDSEC_ALERT_LIMIT has no legacy equivalent, the line is dropped before diffing"
+      sed '/CROWDSEC_ALERT_LIMIT=/d' "$golden_side" > "$norm$path.golden"
+      golden_side="$norm$path.golden"
+    fi
+    if crowdsec_is_new && [[ "$path" == /etc/systemd/system/* ]]; then
+      note_dev "$name: the legacy script never offered a native crowdsec install, its lines in $path are not diffed"
+      cp "$golden_side" "$norm$path.cs"
+      golden_side="$norm$path.cs"
+      strip_crowdsec_unit "$golden_side"
+      strip_crowdsec_unit "$norm$path"
+    fi
+    if ! diff -B -u "$golden_side" "$norm$path"; then
       status=1
     fi
   done < <(golden_paths)
@@ -537,7 +615,7 @@ compare_systemd_tree() {
       echo "  legacy did not create $path"
       status=1
     fi
-  done < "$dir/dirs.txt"
+  done < <(golden_dirs)
   return $status
 }
 
@@ -558,6 +636,10 @@ run_scenario() {
   eval "$legacy" 2>/dev/null
   case "${ans_mode:-}" in
     full) render_full ;;
+    full-native)
+      note_dev "$name: full-native has no legacy equivalent, nothing to diff"
+      return 0
+      ;;
     tm-docker) render_tm_docker ;;
     tm-native) render_tm_native ;;
     agent-docker) render_agent_docker ;;
