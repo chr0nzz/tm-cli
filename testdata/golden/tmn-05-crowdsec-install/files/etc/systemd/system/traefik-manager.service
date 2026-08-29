@@ -1,0 +1,30 @@
+[Unit]
+Description=Traefik Manager
+After=network.target
+
+[Service]
+Type=simple
+User=traefik-manager
+WorkingDirectory=/opt/traefik-manager
+EnvironmentFile=/etc/traefik-manager/env
+Environment="HOME=/opt/traefik-manager"
+ExecStart="/opt/traefik-manager/venv/bin/gunicorn" \
+    --bind 0.0.0.0:5000 \
+    --workers 1 \
+    --log-level info \
+    app:app
+Environment="CONFIG_PATH=/etc/traefik/dynamic.yml"
+Environment="BACKUP_DIR=/var/lib/traefik-manager/backups"
+Environment="SETTINGS_PATH=/var/lib/traefik-manager/manager.yml"
+Environment="COOKIE_SECURE=false"
+Environment="ACME_JSON_PATH=/etc/traefik/acme.json"
+Environment="ACCESS_LOG_PATH=/var/log/traefik/access.log"
+Environment="CROWDSEC_LAPI_URL=http://127.0.0.1:8080"
+Environment="CROWDSEC_MACHINE_ID=traefik-manager"
+Environment="CROWDSEC_ALERT_LIMIT=1000"
+
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

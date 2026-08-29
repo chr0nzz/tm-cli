@@ -1,0 +1,27 @@
+mode: tm-docker
+dir: /srv/traefik-manager
+config:
+  layout: directory
+  dir: /etc/traefik/conf.d
+mounts:
+  access_logs: true
+  access_log_path: /var/log/traefik/access.log
+  certs: false
+  static_config: true
+  static_config_path: /etc/traefik/traefik.yml
+restart:
+  method: poison-pill
+  container: traefik
+crowdsec:
+  mode: connect
+  lapi_url: http://10.0.0.5:8080
+  machine_id: tm-box
+network:
+  name: traefik-manager-net
+  external: false
+access:
+  via_traefik: false
+  port: "5000"
+secrets:
+  CROWDSEC_API_KEY: crowdsec-api-key-PLACEHOLDER
+  CROWDSEC_MACHINE_PASSWORD: crowdsec-machine-password-PLACEHOLDER

@@ -1,0 +1,21 @@
+mode: agent-binary
+tls:
+  method: none
+agent:
+  traefik_url: http://127.0.0.1:8081
+  config_path: /etc/traefik/conf.d
+  port: "8090"
+mounts:
+  access_logs: true
+  access_log_path: /var/log/traefik/access.log
+  certs: false
+  static_config: false
+  plugins: false
+restart:
+  method: none
+crowdsec:
+  mode: install
+  alert_limit: "750"
+secrets:
+  TMA_API_KEY: tma-api-key-PLACEHOLDER
+  CROWDSEC_API_KEY: crowdsec-api-key-PLACEHOLDER

@@ -1,0 +1,3 @@
+/etc/systemd/system/tma.service 0644 privileged
+/etc/traefik-manager-agent/env 0600 privileged
+/etc/crowdsec/acquis.d/traefik.yaml 0644 privileged

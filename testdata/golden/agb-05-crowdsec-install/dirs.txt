@@ -1,0 +1,2 @@
+/etc/traefik-manager-agent
+/etc/crowdsec/acquis.d

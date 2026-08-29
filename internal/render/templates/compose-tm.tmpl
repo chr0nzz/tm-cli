@@ -6,11 +6,7 @@ networks:
   socket-proxy-net:
     internal: true
 {{- end }}
-{{- if .PoisonPill }}
-
-volumes:
-  tm-signals:
-{{- end }}
+{{- template "named-volumes" .NamedVolumes }}
 
 services:
   traefik-manager:
@@ -42,4 +38,7 @@ services:
 {{- end }}
 {{- if .SocketProxy }}
 {{- template "socket-proxy" }}
+{{- end }}
+{{- if .CrowdSec }}
+{{- template "crowdsec" .CrowdSec }}
 {{- end }}

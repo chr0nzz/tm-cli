@@ -1,0 +1,25 @@
+mode: tm-native
+tls:
+  method: none
+native:
+  install_dir: /opt/traefik-manager
+  data_dir: /var/lib/traefik-manager
+  port: "5000"
+  service_user: true
+config:
+  layout: single
+  path: /etc/traefik/dynamic.yml
+mounts:
+  access_logs: true
+  access_log_path: /var/log/traefik/access.log
+  certs: true
+  acme_path: /etc/traefik/acme.json
+  static_config: false
+restart:
+  method: none
+crowdsec:
+  mode: install
+  alert_limit: "1000"
+secrets:
+  CROWDSEC_API_KEY: crowdsec-api-key-PLACEHOLDER
+  CROWDSEC_MACHINE_PASSWORD: crowdsec-machine-password-PLACEHOLDER

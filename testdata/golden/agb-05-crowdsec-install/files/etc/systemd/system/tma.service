@@ -1,0 +1,19 @@
+[Unit]
+Description=Traefik Manager Agent
+After=network.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/traefik-manager-agent/env
+Environment="TRAEFIK_API_URL=http://127.0.0.1:8081"
+Environment="CONFIG_PATH=/etc/traefik/conf.d"
+Environment="ACCESS_LOG_PATH=/var/log/traefik/access.log"
+Environment="CROWDSEC_LAPI_URL=http://127.0.0.1:8080"
+Environment="CROWDSEC_ALERT_LIMIT=750"
+Environment="TMA_PORT=8090"
+ExecStart=/usr/local/bin/tma
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

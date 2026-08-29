@@ -1,4 +1,4 @@
 filenames:
-  - {{ .Path }}
+  - /var/log/traefik/access.log
 labels:
   type: traefik

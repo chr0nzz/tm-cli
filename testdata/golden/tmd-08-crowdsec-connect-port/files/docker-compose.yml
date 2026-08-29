@@ -1,0 +1,35 @@
+networks:
+  traefik-manager-net:
+    external: false
+    name: traefik-manager-net
+
+volumes:
+  tm-signals:
+
+services:
+  traefik-manager:
+    image: ghcr.io/chr0nzz/traefik-manager:latest
+    container_name: traefik-manager
+    restart: unless-stopped
+    networks:
+      - traefik-manager-net
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./config:/app/config
+      - ./backups:/app/backups
+      - /var/log/traefik/access.log:/app/logs/access.log:ro
+      - /etc/traefik/traefik.yml:/app/traefik.yml
+      - tm-signals:/signals
+      - ./config:/app/config/dynamic
+    environment:
+      - COOKIE_SECURE=false
+      - CONFIG_DIR=/app/config/dynamic
+      - STATIC_CONFIG_PATH=/app/traefik.yml
+      - RESTART_METHOD=poison-pill
+      - TRAEFIK_CONTAINER=traefik
+      - SIGNAL_FILE_PATH=/signals/restart.sig
+      - CROWDSEC_LAPI_URL=http://10.0.0.5:8080
+      - CROWDSEC_API_KEY=${CROWDSEC_API_KEY}
+      - CROWDSEC_MACHINE_ID=tm-box
+      - CROWDSEC_MACHINE_PASSWORD=${CROWDSEC_MACHINE_PASSWORD}
