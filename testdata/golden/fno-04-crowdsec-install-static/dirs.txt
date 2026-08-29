@@ -1,0 +1,8 @@
+/etc/traefik
+/etc/traefik/dynamic
+/var/lib/traefik
+/var/lib/traefik/plugins-storage
+/var/log/traefik
+/var/lib/traefik-manager/backups
+/var/lib/traefik-manager/signals
+/etc/crowdsec/acquis.d

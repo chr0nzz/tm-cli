@@ -1,6 +1,9 @@
 package ghrelease
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -245,5 +248,131 @@ func TestDownloadAllowUnverified(t *testing.T) {
 	}
 	if err := Download(context.Background(), AgentRepo, "latest", "tma-linux-amd64", dest, 0o755); err == nil {
 		t.Fatal("strict Download must fail without SHA256SUMS")
+	}
+}
+
+func TestLatestVersionFollowsARenamedRepo(t *testing.T) {
+	var hits []string
+	useServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits = append(hits, r.URL.Path)
+		switch r.URL.Path {
+		case "/chr0nzz/old-name/releases/latest":
+			w.Header().Set("Location", BaseURL+"/chr0nzz/new-name/releases/latest")
+			w.WriteHeader(http.StatusMovedPermanently)
+		case "/chr0nzz/new-name/releases/latest":
+			w.Header().Set("Location", BaseURL+"/chr0nzz/new-name/releases/tag/v1.12.0")
+			w.WriteHeader(http.StatusFound)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	got, err := LatestVersion(context.Background(), "chr0nzz/old-name")
+	if err != nil {
+		t.Fatalf("a renamed repo must still resolve: %v", err)
+	}
+	if got != "v1.12.0" {
+		t.Fatalf("version = %q, want v1.12.0", got)
+	}
+	if len(hits) != 2 {
+		t.Fatalf("expected the repo redirect to be followed once, got %v", hits)
+	}
+}
+
+func TestLatestVersionStopsOnARedirectLoop(t *testing.T) {
+	useServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Location", BaseURL+"/chr0nzz/loop/releases/latest")
+		w.WriteHeader(http.StatusMovedPermanently)
+	}))
+	if _, err := LatestVersion(context.Background(), "chr0nzz/loop"); err == nil ||
+		!strings.Contains(err.Error(), "too many redirects") {
+		t.Fatalf("expected a redirect-loop error, got %v", err)
+	}
+}
+
+func TestTraefikAssetNames(t *testing.T) {
+	if got := TraefikAsset("3.7.12", "amd64"); got != "traefik_v3.7.12_linux_amd64.tar.gz" {
+		t.Errorf("asset = %q", got)
+	}
+	if got := TraefikAsset("v3.7.12", "armv7"); got != "traefik_v3.7.12_linux_armv7.tar.gz" {
+		t.Errorf("armv7 asset = %q", got)
+	}
+	if got := TraefikChecksums("v3.7.12"); got != "traefik_v3.7.12_checksums.txt" {
+		t.Errorf("checksums = %q", got)
+	}
+	want := "https://github.com/traefik/traefik/releases/download/v3.7.12/traefik_v3.7.12_linux_arm64.tar.gz"
+	if got := AssetURL(TraefikRepo, "v3.7.12", TraefikAsset("v3.7.12", "arm64")); got != want {
+		t.Errorf("url = %q, want %q", got, want)
+	}
+}
+
+func traefikTarball(t *testing.T, members map[string][]byte) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+	for name, body := range members {
+		if err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0o755, Size: int64(len(body))}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tw.Write(body); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+func TestFetchTraefikBinary(t *testing.T) {
+	binary := []byte("#!/bin/sh\necho traefik\n")
+	good := traefikTarball(t, map[string][]byte{"LICENSE.md": []byte("license"), "./traefik": binary})
+	noMember := traefikTarball(t, map[string][]byte{"LICENSE.md": []byte("license")})
+	sums := sumOf(good) + "  traefik_v3.7.12_linux_amd64.tar.gz\n" +
+		sumOf([]byte("other")) + "  traefik_v3.7.12_linux_arm64.tar.gz\n" +
+		sumOf(noMember) + "  traefik_v3.7.12_linux_armv7.tar.gz\n"
+	useServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/traefik/traefik/releases/download/v3.7.12/traefik_v3.7.12_checksums.txt":
+			w.Write([]byte(sums))
+		case "/traefik/traefik/releases/download/v3.7.12/traefik_v3.7.12_linux_amd64.tar.gz":
+			w.Write(good)
+		case "/traefik/traefik/releases/download/v3.7.12/traefik_v3.7.12_linux_arm64.tar.gz":
+			w.Write(good)
+		case "/traefik/traefik/releases/download/v3.7.12/traefik_v3.7.12_linux_armv7.tar.gz":
+			w.Write(noMember)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	ctx := context.Background()
+	got, err := FetchTraefikBinary(ctx, "3.7.12", "amd64")
+	if err != nil {
+		t.Fatalf("FetchTraefikBinary: %v", err)
+	}
+	if string(got) != string(binary) {
+		t.Fatalf("extracted binary = %q", got)
+	}
+	_, err = FetchTraefikBinary(ctx, "v3.7.12", "arm64")
+	if err == nil || !strings.Contains(err.Error(), "checksum mismatch for traefik_v3.7.12_linux_arm64.tar.gz") {
+		t.Fatalf("corrupted tarball accepted: %v", err)
+	}
+	_, err = FetchTraefikBinary(ctx, "v3.7.12", "armv7")
+	if err == nil || !strings.Contains(err.Error(), "no traefik member") {
+		t.Fatalf("tarball without the binary accepted: %v", err)
+	}
+	_, err = FetchTraefikBinary(ctx, "v3.7.12", "s390x")
+	if err == nil || !strings.Contains(err.Error(), "no checksum for traefik_v3.7.12_linux_s390x.tar.gz") {
+		t.Fatalf("asset without a checksum accepted: %v", err)
+	}
+	if _, err := FetchTraefikBinary(ctx, "latest", "amd64"); err == nil {
+		t.Fatal("latest must be refused, the version is pinned by the caller")
+	}
+	_, err = FetchTraefikBinary(ctx, "v9.9.9", "amd64")
+	if err == nil || !strings.Contains(err.Error(), "asset not found") {
+		t.Fatalf("missing release error = %v", err)
 	}
 }

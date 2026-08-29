@@ -1,0 +1,11 @@
+http:
+  routers:
+    dashboard:
+      rule: "Host(`{{ .Host }}`)"
+      entryPoints:
+        - {{ .EntryPoint }}
+      service: api@internal
+{{- if .TLS }}
+      tls:
+        certResolver: {{ .Resolver }}
+{{- end }}

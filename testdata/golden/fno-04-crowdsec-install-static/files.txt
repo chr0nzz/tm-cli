@@ -1,0 +1,11 @@
+/etc/traefik/traefik.yml 0644 privileged
+/etc/systemd/system/traefik.service 0644 privileged
+/etc/systemd/system/traefik-manager.service 0644 privileged
+/etc/systemd/system/traefik-restart.path 0644 privileged
+/etc/systemd/system/traefik-restart.service 0644 privileged
+/etc/logrotate.d/traefik 0644 privileged
+/etc/traefik/dynamic/dynamic.yml 0644 create-only privileged
+/var/lib/traefik/acme.json 0600 create-only privileged
+/var/log/traefik/access.log 0644 create-only privileged
+/etc/crowdsec/acquis.d/traefik.yaml 0644 privileged
+/etc/traefik-manager/env 0600 privileged

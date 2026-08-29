@@ -1,0 +1,23 @@
+api:
+  dashboard: false
+  insecure: true
+
+entryPoints:
+  web:
+    address: ":80"
+  traefik:
+    address: "127.0.0.1:8081"
+
+providers:
+  file:
+    filename: /etc/traefik/dynamic/dynamic.yml
+    watch: true
+
+ping: {}
+
+log:
+  level: INFO
+
+accessLog:
+  filePath: /var/log/traefik/access.log
+  bufferingSize: 100

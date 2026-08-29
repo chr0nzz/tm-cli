@@ -1,0 +1,9 @@
+http:
+  routers:
+    dashboard:
+      rule: "Host(`proxy.lan.example`)"
+      entryPoints:
+        - websecure
+      service: api@internal
+      tls:
+        certResolver: letsencrypt

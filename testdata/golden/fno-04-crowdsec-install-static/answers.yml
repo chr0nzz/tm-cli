@@ -1,0 +1,22 @@
+mode: full-native
+deployment: external
+domain: example.com
+dashboard: true
+tls:
+  method: http
+  email: admin@example.com
+native:
+  install_dir: /opt/traefik-manager
+  data_dir: /var/lib/traefik-manager
+  port: "5000"
+config:
+  layout: single
+mounts:
+  static_config: true
+crowdsec:
+  mode: install
+network:
+  traefik_api_port: "8081"
+secrets:
+  CROWDSEC_API_KEY: crowdsec-api-key-PLACEHOLDER
+  CROWDSEC_MACHINE_PASSWORD: crowdsec-machine-password-PLACEHOLDER

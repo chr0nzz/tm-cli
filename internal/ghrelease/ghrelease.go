@@ -1,6 +1,9 @@
 package ghrelease
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -9,7 +12,9 @@ import (
 	"io"
 	"net"
 	"net/http"
+	neturl "net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -19,9 +24,10 @@ import (
 )
 
 const (
-	Repo      = "chr0nzz/tm-cli"
-	AgentRepo = "chr0nzz/traefik-manager"
-	SumsFile  = "SHA256SUMS"
+	Repo        = "chr0nzz/tm-cli"
+	AgentRepo   = "chr0nzz/traefik-manager"
+	TraefikRepo = "traefik/traefik"
+	SumsFile    = "SHA256SUMS"
 )
 
 var (
@@ -77,31 +83,49 @@ func LatestVersion(ctx context.Context, repo string) (string, error) {
 			return http.ErrUseLastResponse
 		},
 	}
-	req, err := newRequest(ctx, http.MethodHead, url)
+	for hop := 0; hop < 5; hop++ {
+		req, err := newRequest(ctx, http.MethodHead, url)
+		if err != nil {
+			return "", err
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			return "", fmt.Errorf("fetch %s: %w", url, err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode == http.StatusNotFound {
+			return "", fmt.Errorf("no releases found for %s", repo)
+		}
+		loc := resp.Header.Get("Location")
+		if resp.StatusCode < 300 || resp.StatusCode > 399 || loc == "" {
+			return "", fmt.Errorf("fetch %s: unexpected response %s", url, resp.Status)
+		}
+		if _, tag, ok := strings.Cut(loc, "/tag/"); ok {
+			tag = strings.TrimSuffix(strings.TrimSpace(tag), "/")
+			if tag == "" {
+				return "", fmt.Errorf("fetch %s: unexpected redirect to %s", url, loc)
+			}
+			return tag, nil
+		}
+		next, err := resolveRedirect(url, loc)
+		if err != nil {
+			return "", fmt.Errorf("fetch %s: unexpected redirect to %s", url, loc)
+		}
+		url = next
+	}
+	return "", fmt.Errorf("too many redirects looking up the latest release of %s", repo)
+}
+
+func resolveRedirect(from, loc string) (string, error) {
+	base, err := neturl.Parse(from)
 	if err != nil {
 		return "", err
 	}
-	resp, err := client.Do(req)
+	next, err := base.Parse(loc)
 	if err != nil {
-		return "", fmt.Errorf("fetch %s: %w", url, err)
+		return "", err
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusNotFound {
-		return "", fmt.Errorf("no releases found for %s", repo)
-	}
-	loc := resp.Header.Get("Location")
-	if resp.StatusCode < 300 || resp.StatusCode > 399 || loc == "" {
-		return "", fmt.Errorf("fetch %s: unexpected response %s", url, resp.Status)
-	}
-	_, tag, ok := strings.Cut(loc, "/tag/")
-	if !ok {
-		return "", fmt.Errorf("fetch %s: unexpected redirect to %s", url, loc)
-	}
-	tag = strings.TrimSuffix(strings.TrimSpace(tag), "/")
-	if tag == "" {
-		return "", fmt.Errorf("fetch %s: unexpected redirect to %s", url, loc)
-	}
-	return tag, nil
+	return next.String(), nil
 }
 
 var errAssetNotFound = errors.New("asset not found")
@@ -251,12 +275,90 @@ func expectedSum(sums []byte, asset string) (string, error) {
 		}
 		hash = strings.ToLower(strings.TrimSpace(hash))
 		if len(hash) != sha256.Size*2 {
-			return "", fmt.Errorf("malformed checksum for %s in %s", asset, SumsFile)
+			return "", fmt.Errorf("malformed checksum for %s in the checksums file", asset)
 		}
 		if _, err := hex.DecodeString(hash); err != nil {
-			return "", fmt.Errorf("malformed checksum for %s in %s", asset, SumsFile)
+			return "", fmt.Errorf("malformed checksum for %s in the checksums file", asset)
 		}
 		return hash, nil
 	}
-	return "", errors.New("no checksum for " + asset + " in " + SumsFile)
+	return "", errors.New("no checksum for " + asset + " in the checksums file")
+}
+
+func TraefikAsset(version, arch string) string {
+	return "traefik_" + NormalizeVersion(version) + "_linux_" + arch + ".tar.gz"
+}
+
+func TraefikChecksums(version string) string {
+	return "traefik_" + NormalizeVersion(version) + "_checksums.txt"
+}
+
+func FetchTraefikBinary(ctx context.Context, version, arch string) ([]byte, error) {
+	version = NormalizeVersion(version)
+	if version == "latest" {
+		return nil, errors.New("a pinned traefik version is required: resolve the latest tag first")
+	}
+	asset := TraefikAsset(version, arch)
+	tmpDir, err := os.MkdirTemp("", "tm-download-")
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(tmpDir)
+	sumsPath := filepath.Join(tmpDir, TraefikChecksums(version))
+	if err := fetchToFile(ctx, AssetURL(TraefikRepo, version, TraefikChecksums(version)), sumsPath); err != nil {
+		return nil, err
+	}
+	sums, err := os.ReadFile(sumsPath)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := expectedSum(sums, asset); err != nil {
+		return nil, err
+	}
+	tarPath := filepath.Join(tmpDir, asset)
+	if err := fetchToFile(ctx, AssetURL(TraefikRepo, version, asset), tarPath); err != nil {
+		return nil, err
+	}
+	data, err := os.ReadFile(tarPath)
+	if err != nil {
+		return nil, err
+	}
+	if err := Verify(sums, asset, data); err != nil {
+		return nil, err
+	}
+	bin, err := extractTarMember(data, "traefik")
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", asset, err)
+	}
+	return bin, nil
+}
+
+func extractTarMember(data []byte, name string) ([]byte, error) {
+	gz, err := gzip.NewReader(bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("open gzip: %w", err)
+	}
+	defer gz.Close()
+	tr := tar.NewReader(gz)
+	for {
+		hdr, err := tr.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("read tar: %w", err)
+		}
+		if hdr.Typeflag != tar.TypeReg {
+			continue
+		}
+		if strings.TrimPrefix(path.Clean(hdr.Name), "./") != name {
+			continue
+		}
+		member, err := io.ReadAll(tr)
+		if err != nil {
+			return nil, fmt.Errorf("read %s from tar: %w", name, err)
+		}
+		return member, nil
+	}
+	return nil, fmt.Errorf("no %s member in the archive", name)
 }

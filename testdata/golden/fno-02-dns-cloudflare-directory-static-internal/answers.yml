@@ -1,0 +1,24 @@
+mode: full-native
+deployment: internal
+domain: lan.example
+hosts:
+  dashboard: proxy.lan.example
+dashboard: true
+tls:
+  method: dns
+  provider: cloudflare
+  email: admin@lan.example
+native:
+  install_dir: /opt/traefik-manager
+  data_dir: /var/lib/traefik-manager
+  port: "5000"
+config:
+  layout: directory
+mounts:
+  static_config: true
+crowdsec:
+  mode: none
+network:
+  traefik_api_port: "9080"
+secrets:
+  CF_DNS_API_TOKEN: cf-dns-api-token-PLACEHOLDER
