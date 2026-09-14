@@ -57,13 +57,35 @@ func loadScenario(t *testing.T, dir string) *answers.Answers {
 	return a
 }
 
+const staticFixture = "input/traefik.yml"
+
+func loadStatic(t *testing.T, dir string, a *answers.Answers) Static {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(dir, staticFixture))
+	if err != nil {
+		if !os.IsNotExist(err) {
+			t.Fatal(err)
+		}
+		if a.CrowdSec.BouncerPlugin && !a.Mode.HasTraefik() {
+			t.Fatalf("%s needs %s: the bouncer plugin is declared in the traefik.yml this mode does not generate", dir, staticFixture)
+		}
+		return Static{}
+	}
+	st := StaticFrom(a.Mounts.StaticConfigPath, data)
+	if !st.Ready {
+		t.Fatalf("%s: %s", staticFixture, st.Note)
+	}
+	return st
+}
+
 func runScenario(t *testing.T, dir string) {
 	a := loadScenario(t, dir)
-	out, err := Render(Input{Answers: a, User: testUser})
+	static := loadStatic(t, dir, a)
+	out, err := Render(Input{Answers: a, User: testUser, Static: static})
 	if err != nil {
 		t.Fatal(err)
 	}
-	checkOutput(t, a, out)
+	checkOutput(t, a, static, out)
 	if *update {
 		writeGolden(t, dir, out)
 		return
@@ -79,6 +101,12 @@ func manifestLine(f File) string {
 	line := fmt.Sprintf("%s %04o", f.Path, f.Mode)
 	if f.CreateOnly {
 		line += " create-only"
+	}
+	if f.Fill {
+		line += " fill"
+	}
+	if f.Untracked {
+		line += " untracked"
 	}
 	if f.Privileged {
 		line += " privileged"
@@ -151,8 +179,14 @@ func compareGolden(t *testing.T, dir string, out *Output) {
 	}
 }
 
-func checkOutput(t *testing.T, a *answers.Answers, out *Output) {
+func checkOutput(t *testing.T, a *answers.Answers, static Static, out *Output) {
 	t.Helper()
+	plan := Bouncer(a, static)
+	inUsersTraefik := map[string]bool{}
+	if plan.Enabled {
+		inUsersTraefik[plan.StaticPath] = true
+		inUsersTraefik[plan.MiddlewarePath] = true
+	}
 	seen := map[string]bool{}
 	for _, f := range out.Files {
 		if seen[f.Path] {
@@ -163,16 +197,19 @@ func checkOutput(t *testing.T, a *answers.Answers, out *Output) {
 			t.Errorf("file %q has no path or mode", f.Path)
 		}
 		abs := strings.HasPrefix(f.Path, "/")
-		if abs != a.Mode.IsSystemd() {
-			t.Errorf("%s: absolute paths are for systemd modes only", f.Path)
+		if abs != a.Mode.IsSystemd() && !inUsersTraefik[f.Path] {
+			t.Errorf("%s: absolute paths are for systemd modes only, or the bouncer files in the user's own Traefik tree", f.Path)
 		}
 		if abs != f.Privileged {
 			t.Errorf("%s: privileged must be set exactly for absolute paths", f.Path)
 		}
+		if f.CreateOnly && f.Fill {
+			t.Errorf("%s: create-only and fill are alternatives, not both", f.Path)
+		}
 		if f.Content != "" && !strings.HasSuffix(f.Content, "\n") {
 			t.Errorf("%s does not end with a newline", f.Path)
 		}
-		if strings.Contains(f.Content, "PLACEHOLDER") && !isSecretFile(f.Path) {
+		if strings.Contains(f.Content, "PLACEHOLDER") && !isSecretFile(f.Path) && f.Path != plan.MiddlewarePath {
 			t.Errorf("%s leaks a secret value", f.Path)
 		}
 		ext := filepath.Ext(f.Path)
@@ -187,6 +224,9 @@ func checkOutput(t *testing.T, a *answers.Answers, out *Output) {
 			}
 		}
 	}
+	if plan.On && plan.Enabled {
+		checkBouncer(t, a, plan, out)
+	}
 	for _, d := range out.Dirs {
 		if d == "" {
 			t.Error("empty dir entry")
@@ -198,6 +238,42 @@ func checkOutput(t *testing.T, a *answers.Answers, out *Output) {
 	for _, k := range a.SecretKeys() {
 		if !referencesSecret(out, k) {
 			t.Errorf("secret %s is never referenced by the rendered files", k)
+		}
+	}
+}
+
+func checkBouncer(t *testing.T, a *answers.Answers, plan BouncerPlan, out *Output) {
+	t.Helper()
+	static, ok := findFile(out, plan.StaticPath)
+	if !ok {
+		t.Fatalf("the bouncer plugin is on but nothing writes %s", plan.StaticPath)
+	}
+	declared := "\n    " + plan.Alias + ":\n      moduleName: " + BouncerModule + "\n      version: " + BouncerVersion + "\n"
+	if !strings.Contains(static.Content, declared) {
+		t.Errorf("%s does not declare the bouncer under the alias %q:\n%s", plan.StaticPath, plan.Alias, static.Content)
+	}
+	if plan.MiddlewarePath == "" {
+		if plan.Note == "" {
+			t.Error("no middleware was written and no reason was given")
+		}
+		return
+	}
+	mw, ok := findFile(out, plan.MiddlewarePath)
+	if !ok {
+		t.Fatalf("no middleware at %s", plan.MiddlewarePath)
+	}
+	if !strings.Contains(mw.Content, "\n        "+plan.Alias+":\n") {
+		t.Errorf("%s does not key the plugin block on the declared alias %q:\n%s", plan.MiddlewarePath, plan.Alias, mw.Content)
+	}
+	if !strings.Contains(mw.Content, "CrowdsecLapiHost: "+plan.LapiHost+"\n") {
+		t.Errorf("%s does not point at the lapi host %q:\n%s", plan.MiddlewarePath, plan.LapiHost, mw.Content)
+	}
+	if key := a.Secrets[answers.SecretCrowdSecAPIKey]; key != "" && !strings.Contains(mw.Content, "CrowdsecLapiKey: "+key+"\n") {
+		t.Errorf("%s does not carry the bouncer key:\n%s", plan.MiddlewarePath, mw.Content)
+	}
+	for _, ip := range plan.TrustedIPs {
+		if !strings.Contains(mw.Content, "\n            - "+ip+"\n") {
+			t.Errorf("%s does not seed the trusted ip %s:\n%s", plan.MiddlewarePath, ip, mw.Content)
 		}
 	}
 }

@@ -22,6 +22,7 @@ type dashboardView struct {
 	EntryPoint string
 	TLS        bool
 	Resolver   string
+	Bouncer    *bouncerView
 }
 
 func newDashboardView(a *answers.Answers) dashboardView {
@@ -84,7 +85,7 @@ func nativeCrowdSecEnv(a *answers.Answers) []string {
 	return env
 }
 
-func renderFullNative(a *answers.Answers) (*Output, error) {
+func renderFullNative(a *answers.Answers, plan BouncerPlan) (*Output, error) {
 	tls := a.TLS.Method != answers.TLSNone
 	single := a.Config.Layout == answers.LayoutSingle
 	static := a.Mounts.StaticConfig
@@ -102,7 +103,7 @@ func renderFullNative(a *answers.Answers) (*Output, error) {
 	if a.CrowdSec.Mode == answers.CrowdSecInstall {
 		b.dir(CrowdSecAcquisDir)
 	}
-	b.systemTmpl(answers.DefaultStaticConfigPath, 0o644, "traefik.yml.tmpl", newNativeTraefikView(a))
+	b.systemTmpl(answers.DefaultStaticConfigPath, 0o644, "traefik.yml.tmpl", newNativeTraefikView(a, plan))
 	b.systemTmpl(TraefikUnitPath, 0o644, "traefik.service.tmpl", newTraefikUnitView(a))
 	b.systemTmpl(NativeUnitPath, 0o644, "tm.service.tmpl", newFullNativeTMView(a))
 	if static {
@@ -116,9 +117,9 @@ func renderFullNative(a *answers.Answers) (*Output, error) {
 		b.systemTmpl(RestartServiceUnit, 0o644, "traefik-restart.service.tmpl", w)
 	}
 	b.systemTmpl(LogrotatePath, 0o644, "traefik-logrotate.tmpl", nil)
-	dash := newDashboardView(a)
+	dash := dashboardBouncer(a, plan, newDashboardView(a))
 	if single {
-		b.systemSeedTmpl(a.Config.Path, 0o644, "dynamic.yml.tmpl", dash)
+		b.dynamicFile(a.Config.Path, true, dash)
 	} else {
 		if dash.Host != "" {
 			b.systemSeedTmpl(filepath.Join(a.Config.Dir, "dashboard.yml"), 0o644, "dashboard.yml.tmpl", dash)
@@ -133,5 +134,6 @@ func renderFullNative(a *answers.Answers) (*Output, error) {
 	if len(a.SecretKeys()) > 0 {
 		b.system(NativeEnvPath, 0o600, EnvFile(a))
 	}
+	b.bouncerMiddleware(a, plan)
 	return b.result()
 }

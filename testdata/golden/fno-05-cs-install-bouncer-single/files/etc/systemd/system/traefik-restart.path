@@ -1,0 +1,8 @@
+[Unit]
+Description=Watch for Traefik Manager restart signal
+
+[Path]
+PathExists=/var/lib/traefik-manager/signals/restart.sig
+
+[Install]
+WantedBy=multi-user.target

@@ -60,6 +60,17 @@ func (m Mode) CrowdSecLAPIURL() string {
 	return DefaultLAPIURL
 }
 
+func (a *Answers) NativeLAPIPort() string {
+	if a.CrowdSec.LAPIPort != "" {
+		return a.CrowdSec.LAPIPort
+	}
+	return NativeLAPIPort
+}
+
+func (a *Answers) NativeLAPIURL() string {
+	return "http://127.0.0.1:" + a.NativeLAPIPort()
+}
+
 func (m Mode) Label() string {
 	switch m {
 	case ModeFull:
@@ -159,10 +170,12 @@ type Restart struct {
 }
 
 type CrowdSec struct {
-	Mode       string `yaml:"mode"`
-	LAPIURL    string `yaml:"lapi_url,omitempty"`
-	MachineID  string `yaml:"machine_id,omitempty"`
-	AlertLimit string `yaml:"alert_limit,omitempty"`
+	Mode          string `yaml:"mode"`
+	LAPIURL       string `yaml:"lapi_url,omitempty"`
+	MachineID     string `yaml:"machine_id,omitempty"`
+	AlertLimit    string `yaml:"alert_limit,omitempty"`
+	LAPIPort      string `yaml:"lapi_port,omitempty"`
+	BouncerPlugin bool   `yaml:"bouncer_plugin,omitempty"`
 }
 
 type Network struct {
@@ -290,13 +303,13 @@ func Defaults(mode Mode) *Answers {
 		a.Config.Dir = NativeTraefikDynamicDir
 		a.Mounts.AcmePath = NativeAcmePath
 		a.Restart.SignalFile = DefaultNativeSignalFile
-		a.CrowdSec.LAPIURL = NativeLAPIURL
+		a.CrowdSec.LAPIURL = a.NativeLAPIURL()
 	case ModeTMDocker:
 		a.Dir = filepath.Join(homeDir(), "traefik-manager")
 		a.Network.External = true
 	case ModeTMNative:
 		a.Restart.SignalFile = DefaultNativeSignalFile
-		a.CrowdSec.LAPIURL = NativeLAPIURL
+		a.CrowdSec.LAPIURL = a.NativeLAPIURL()
 	case ModeAgentDocker:
 		a.Dir = "/opt/traefik-manager-agent"
 		a.Mounts.AccessLogs = false
@@ -307,7 +320,7 @@ func Defaults(mode Mode) *Answers {
 	case ModeAgentBinary:
 		a.Mounts.AccessLogs = false
 		a.Mounts.Certs = false
-		a.CrowdSec.LAPIURL = NativeLAPIURL
+		a.CrowdSec.LAPIURL = a.NativeLAPIURL()
 	}
 	return a
 }
@@ -473,7 +486,11 @@ func (a *Answers) Finalize() {
 func (a *Answers) finalizeCrowdSec() {
 	switch a.CrowdSec.Mode {
 	case CrowdSecInstall:
-		a.CrowdSec.LAPIURL = a.Mode.CrowdSecLAPIURL()
+		if a.Mode.IsSystemd() {
+			a.CrowdSec.LAPIURL = a.NativeLAPIURL()
+		} else {
+			a.CrowdSec.LAPIURL = a.Mode.CrowdSecLAPIURL()
+		}
 		a.Mounts.AccessLogs = true
 		if a.Mounts.AccessLogPath == "" {
 			a.Mounts.AccessLogPath = DefaultAccessLogPath
@@ -482,8 +499,13 @@ func (a *Answers) finalizeCrowdSec() {
 		if a.CrowdSec.LAPIURL == "" {
 			a.CrowdSec.LAPIURL = a.Mode.CrowdSecLAPIURL()
 		}
+		a.CrowdSec.LAPIPort = ""
 	case CrowdSecNone:
 		a.CrowdSec.AlertLimit = ""
+		a.CrowdSec.LAPIPort = ""
+	}
+	if !a.BouncerPluginAvailable() {
+		a.CrowdSec.BouncerPlugin = false
 	}
 	if a.Mode.IsAgent() || a.CrowdSec.Mode == CrowdSecNone {
 		a.CrowdSec.MachineID = ""
@@ -492,6 +514,13 @@ func (a *Answers) finalizeCrowdSec() {
 	if a.CrowdSec.Mode == CrowdSecInstall {
 		a.CrowdSec.MachineID = CrowdSecMachineID
 	}
+}
+
+func (a *Answers) BouncerPluginAvailable() bool {
+	if a.CrowdSec.Mode == CrowdSecNone {
+		return false
+	}
+	return a.Mode.HasTraefik() || a.Mounts.StaticConfig
 }
 
 func expandHome(p string) string {
@@ -543,6 +572,14 @@ func (a *Answers) Validate() error {
 	if err := oneOf("crowdsec.mode", a.CrowdSec.Mode, CrowdSecNone, CrowdSecInstall, CrowdSecConnect); err != nil {
 		return err
 	}
+	if a.CrowdSec.LAPIPort != "" {
+		if err := port("crowdsec.lapi_port", a.CrowdSec.LAPIPort); err != nil {
+			return err
+		}
+		if !a.Mode.IsSystemd() {
+			return fmt.Errorf("crowdsec.lapi_port only applies to a native CrowdSec install, the container one is reached on its own network")
+		}
+	}
 	if a.CrowdSec.AlertLimit != "" {
 		n, err := strconv.Atoi(a.CrowdSec.AlertLimit)
 		if err != nil || n < 0 || n > 100000 {
@@ -554,6 +591,14 @@ func (a *Answers) Validate() error {
 	}
 	if a.CrowdSec.Mode == CrowdSecConnect && a.CrowdSec.LAPIURL == "" {
 		return fmt.Errorf("crowdsec.lapi_url is required")
+	}
+	if a.CrowdSec.BouncerPlugin {
+		if a.CrowdSec.Mode == CrowdSecNone {
+			return fmt.Errorf("crowdsec.bouncer_plugin needs crowdsec.mode install or connect: the bouncer has no local API to ask")
+		}
+		if !a.BouncerPluginAvailable() {
+			return fmt.Errorf("crowdsec.bouncer_plugin needs mounts.static_config for %s: the plugin is declared in traefik.yml", a.Mode)
+		}
 	}
 	if err := a.crowdSecPortConflict(); err != nil {
 		return err
@@ -708,29 +753,31 @@ func (a *Answers) crowdSecPortConflict() error {
 	if a.CrowdSec.Mode != CrowdSecInstall || !a.Mode.IsSystemd() {
 		return nil
 	}
+	port := a.NativeLAPIPort()
 	switch a.Mode {
 	case ModeFullNative:
-		if a.Network.TraefikAPIPort == NativeLAPIPort {
-			return fmt.Errorf("network.traefik_api_port %s is the port the CrowdSec LAPI listens on: change network.traefik_api_port", NativeLAPIPort)
+		if a.Network.TraefikAPIPort == port {
+			return fmt.Errorf("network.traefik_api_port %s is the port the CrowdSec LAPI listens on: change network.traefik_api_port, or set crowdsec.lapi_port", port)
 		}
 	case ModeTMNative:
-		if a.Native.Port == NativeLAPIPort {
-			return fmt.Errorf("native.port %s is the port the CrowdSec LAPI listens on: change native.port", NativeLAPIPort)
+		if a.Native.Port == port {
+			return fmt.Errorf("native.port %s is the port the CrowdSec LAPI listens on: change native.port, or set crowdsec.lapi_port", port)
 		}
 	case ModeAgentBinary:
-		if a.Agent.Port == NativeLAPIPort {
-			return fmt.Errorf("agent.port %s is the port the CrowdSec LAPI listens on: change agent.port", NativeLAPIPort)
+		if a.Agent.Port == port {
+			return fmt.Errorf("agent.port %s is the port the CrowdSec LAPI listens on: change agent.port, or set crowdsec.lapi_port", port)
 		}
-		if isLocalLAPIAddress(a.Agent.TraefikURL) {
-			return fmt.Errorf("agent.traefik_url %s is the address the CrowdSec LAPI listens on: move the Traefik API to another port", a.Agent.TraefikURL)
+		if a.isLocalLAPIAddress(a.Agent.TraefikURL) {
+			return fmt.Errorf("agent.traefik_url %s is the address the CrowdSec LAPI listens on: move the Traefik API to another port, or set crowdsec.lapi_port", a.Agent.TraefikURL)
 		}
 	}
 	return nil
 }
 
-func isLocalLAPIAddress(url string) bool {
+func (a *Answers) isLocalLAPIAddress(url string) bool {
 	u := strings.TrimRight(url, "/")
-	return u == NativeLAPIURL || u == "http://localhost:"+NativeLAPIPort
+	port := a.NativeLAPIPort()
+	return u == "http://127.0.0.1:"+port || u == "http://localhost:"+port
 }
 
 var (

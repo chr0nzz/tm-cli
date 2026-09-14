@@ -266,14 +266,20 @@ func mountsValue(a *answers.Answers, order ...string) string {
 }
 
 func crowdsecValue(a *answers.Answers) string {
+	var v string
 	switch a.CrowdSec.Mode {
 	case answers.CrowdSecInstall:
+		v = "install alongside"
 		if a.Mode.IsSystemd() {
-			return "install (CrowdSec package)"
+			v = "install (CrowdSec package)"
 		}
-		return "install alongside"
 	case answers.CrowdSecConnect:
-		return "connect  " + a.CrowdSec.LAPIURL
+		v = "connect  " + a.CrowdSec.LAPIURL
+	default:
+		return "disabled"
 	}
-	return "disabled"
+	if a.CrowdSec.BouncerPlugin {
+		v += "  bouncer plugin"
+	}
+	return v
 }

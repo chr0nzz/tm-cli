@@ -1,7 +1,9 @@
 # Traefik dynamic configuration
 # Traefik Manager writes routers, services and middlewares here.
-{{- if .Host }}
+{{- if or .Host .Bouncer }}
 http:
+{{- end }}
+{{- if .Host }}
   routers:
     dashboard:
       rule: "Host(`{{ .Host }}`)"
@@ -12,4 +14,8 @@ http:
       tls:
         certResolver: {{ .Resolver }}
 {{- end }}
+{{- end }}
+{{- if .Bouncer }}
+  middlewares:
+{{- template "bouncer-middleware" .Bouncer }}
 {{- end }}

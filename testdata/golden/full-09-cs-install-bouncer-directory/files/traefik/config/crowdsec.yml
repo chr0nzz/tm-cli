@@ -1,0 +1,10 @@
+http:
+  middlewares:
+    crowdsec:
+      plugin:
+        crowdsec:
+          Enabled: "true"
+          CrowdsecMode: live
+          CrowdsecLapiScheme: http
+          CrowdsecLapiHost: crowdsec:8080
+          CrowdsecLapiKey: crowdsec-api-key-PLACEHOLDER

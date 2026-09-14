@@ -149,7 +149,7 @@ type agentView struct {
 	NamedVolumes []string
 }
 
-func renderAgentDocker(a *answers.Answers) (*Output, error) {
+func renderAgentDocker(a *answers.Answers, plan BouncerPlan) (*Output, error) {
 	install := a.CrowdSec.Mode == answers.CrowdSecInstall
 	p := agentDockerPaths(a)
 	v := agentView{
@@ -194,6 +194,8 @@ func renderAgentDocker(a *answers.Answers) (*Output, error) {
 	if install {
 		b.acquisDocker()
 	}
+	b.bouncerStatic(plan)
+	b.bouncerMiddleware(a, plan)
 	return b.result()
 }
 
@@ -216,7 +218,7 @@ type agentTraefikView struct {
 	NamedVolumes    []string
 }
 
-func renderAgentDockerTraefik(a *answers.Answers) (*Output, error) {
+func renderAgentDockerTraefik(a *answers.Answers, plan BouncerPlan) (*Output, error) {
 	install := a.CrowdSec.Mode == answers.CrowdSecInstall
 	tls := a.TLS.Method != answers.TLSNone
 	single := a.Config.Layout == answers.LayoutSingle
@@ -293,9 +295,9 @@ func renderAgentDockerTraefik(a *answers.Answers) (*Output, error) {
 	}
 	b.tmpl("docker-compose.yml", 0o644, "compose-agent-traefik.tmpl", v)
 	b.env(a)
-	b.tmpl("traefik/traefik.yml", 0o644, "traefik.yml.tmpl", newTraefikView(a))
+	b.tmpl("traefik/traefik.yml", 0o644, "traefik.yml.tmpl", newTraefikView(a, plan))
 	if single {
-		b.seedTmpl("traefik/config/dynamic.yml", 0o644, "dynamic.yml.tmpl", dashboardView{})
+		b.dynamicFile("traefik/config/dynamic.yml", false, dashboardBouncer(a, plan, dashboardView{}))
 	}
 	b.seed("traefik/logs/access.log", 0o644, "")
 	if tls {
@@ -304,6 +306,7 @@ func renderAgentDockerTraefik(a *answers.Answers) (*Output, error) {
 	if install {
 		b.acquisDocker()
 	}
+	b.bouncerMiddleware(a, plan)
 	return b.result()
 }
 
@@ -312,7 +315,7 @@ type agentUnitView struct {
 	Env     []string
 }
 
-func renderAgentBinary(a *answers.Answers) (*Output, error) {
+func renderAgentBinary(a *answers.Answers, plan BouncerPlan) (*Output, error) {
 	env := envLines(agentEnv(a, agentDockerPaths(a), false), false)
 	env = append(env, "TMA_PORT="+a.Agent.Port)
 	for i, line := range env {
@@ -326,5 +329,7 @@ func renderAgentBinary(a *answers.Answers) (*Output, error) {
 	b.systemTmpl(AgentUnitPath, 0o644, "tma.service.tmpl", agentUnitView{EnvFile: AgentEnvPath, Env: env})
 	b.system(AgentEnvPath, 0o600, EnvFile(a))
 	b.acquisNative(a)
+	b.bouncerStatic(plan)
+	b.bouncerMiddleware(a, plan)
 	return b.result()
 }

@@ -43,3 +43,20 @@ volumes:
 {{- end }}
 {{- end }}
 {{- end }}
+
+{{ define "bouncer-middleware" }}
+    {{ .Name }}:
+      plugin:
+        {{ .Alias }}:
+          Enabled: "true"
+          CrowdsecMode: {{ .Mode }}
+          CrowdsecLapiScheme: {{ .Scheme }}
+          CrowdsecLapiHost: {{ .Host }}
+          CrowdsecLapiKey: {{ .Key }}
+{{- if .TrustedIPs }}
+          ForwardedHeadersTrustedIPs:
+{{- range .TrustedIPs }}
+            - {{ . }}
+{{- end }}
+{{- end }}
+{{- end }}

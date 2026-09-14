@@ -1,0 +1,37 @@
+api:
+  dashboard: true
+
+entryPoints:
+  http:
+    address: ":80"
+    http:
+      redirections:
+        entryPoint:
+          to: https
+          scheme: https
+  https:
+    address: ":443"
+    forwardedHeaders:
+      trustedIPs:
+        - 127.0.0.1/32
+        - 172.17.0.0/16
+        - 100.64.0.0/10
+
+providers:
+  docker:
+    exposedByDefault: false
+  file:
+    directory: /opt/traefik/conf.d
+    watch: true
+
+log:
+  level: INFO
+
+accessLog:
+  filePath: /opt/traefik/logs/access.log
+
+experimental:
+  plugins:
+    crowdsec:
+      moduleName: github.com/maxlerebourg/crowdsec-bouncer-traefik-plugin
+      version: v1.7.1

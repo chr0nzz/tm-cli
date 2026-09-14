@@ -26,6 +26,8 @@ type Installer struct {
 	Confirm         func(prompt string, def bool) (bool, error)
 	TempPassword    string
 	TraefikVersion  string
+	bouncer         render.BouncerPlan
+	staticBackup    string
 }
 
 func New(u *ui.UI, version string) *Installer {
@@ -45,11 +47,14 @@ func (in *Installer) Install(ctx context.Context, a *answers.Answers, opts Optio
 	if err := a.GenerateSecrets(); err != nil {
 		return nil, err
 	}
-	out, err := render.Render(render.Input{Answers: a, User: host.CurrentUser()})
+	static := in.readBouncerStatic(a)
+	in.bouncer = render.Bouncer(a, static)
+	out, err := render.Render(render.Input{Answers: a, User: host.CurrentUser(), Static: static})
 	if err != nil {
 		return nil, err
 	}
 	if opts.DryRun {
+		in.staticBackup = ""
 		return nil, in.dryRun(a, out, opts.OutputDir)
 	}
 	composeCmd := ""
@@ -90,6 +95,7 @@ func (in *Installer) Install(ctx context.Context, a *answers.Answers, opts Optio
 }
 
 func (in *Installer) writeOutput(a *answers.Answers, out *render.Output, st *state.State, overwrite map[string]bool) error {
+	in.backupStatic()
 	base := a.Dir
 	for _, d := range out.Dirs {
 		p := resolvePath(base, d)
@@ -101,6 +107,16 @@ func (in *Installer) writeOutput(a *answers.Answers, out *render.Output, st *sta
 		p := resolvePath(base, f.Path)
 		if f.CreateOnly && host.Exists(p) {
 			continue
+		}
+		if f.Fill && host.Exists(p) {
+			existing, err := host.ReadFile(p)
+			if err != nil {
+				return fmt.Errorf("read %s: %w", p, err)
+			}
+			if !render.IsPlaceholder(existing) {
+				in.UI.Warn(displayPath(base, f.Path) + " already has content, leaving it alone")
+				continue
+			}
 		}
 		if overwrite != nil && !f.CreateOnly {
 			if keep, ok := overwrite[f.Path]; ok && !keep {
@@ -114,7 +130,7 @@ func (in *Installer) writeOutput(a *answers.Answers, out *render.Output, st *sta
 		if err := host.WriteFile(p, []byte(f.Content), mode); err != nil {
 			return fmt.Errorf("write %s: %w", p, err)
 		}
-		if !f.CreateOnly {
+		if !f.CreateOnly && !f.Fill && !f.Untracked {
 			if st.OwnedFiles == nil {
 				st.OwnedFiles = map[string]string{}
 			}

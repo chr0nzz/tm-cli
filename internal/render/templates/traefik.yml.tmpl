@@ -54,6 +54,14 @@ certificatesResolvers:
 
 ping: {}
 {{- end }}
+{{- if .Plugin }}
+
+experimental:
+  plugins:
+    {{ .Plugin.Alias }}:
+      moduleName: {{ .Plugin.Module }}
+      version: {{ .Plugin.Version }}
+{{- end }}
 
 log:
   level: INFO

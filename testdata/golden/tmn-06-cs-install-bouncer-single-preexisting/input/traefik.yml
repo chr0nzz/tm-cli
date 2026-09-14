@@ -1,0 +1,18 @@
+entryPoints:
+  web:
+    address: ":80"
+  websecure:
+    address: ":443"
+    forwardedHeaders:
+      trustedIPs:
+        - 127.0.0.1/32
+
+experimental:
+  localPlugins:
+    example:
+      moduleName: github.com/example/local
+
+providers:
+  file:
+    filename: /etc/traefik/dynamic.yml
+    watch: true

@@ -3,6 +3,7 @@ package installer
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -11,7 +12,9 @@ import (
 	"testing"
 
 	"github.com/chr0nzz/tm-cli/internal/answers"
+	"github.com/chr0nzz/tm-cli/internal/render"
 	"github.com/chr0nzz/tm-cli/internal/state"
+	"github.com/chr0nzz/tm-cli/internal/ui"
 )
 
 func TestMergeEnvKeepsExistingAndUpdates(t *testing.T) {
@@ -299,5 +302,125 @@ func TestServiceNamesIncludeCrowdSec(t *testing.T) {
 	a.Finalize()
 	if got := strings.Join(serviceNames(a), ","); got != "traefik-manager,crowdsec" {
 		t.Errorf("tm-docker services: %s", got)
+	}
+}
+
+func fillOutput(path string) *render.Output {
+	return &render.Output{Files: []render.File{{
+		Path:    path,
+		Mode:    0o644,
+		Content: "http:\n  middlewares:\n    crowdsec: {}\n",
+		Fill:    true,
+	}}}
+}
+
+func TestWriteOutputFillsOnlyEmptyPlaceholders(t *testing.T) {
+	cases := map[string]struct {
+		existing string
+		written  bool
+	}{
+		"missing":     {existing: "", written: true},
+		"empty":       {existing: "\n", written: true},
+		"placeholder": {existing: "{}\n", written: true},
+		"comments":    {existing: "# nothing here yet\n", written: true},
+		"real":        {existing: "http:\n  routers:\n    a:\n      rule: Host(`x`)\n", written: false},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			t.Setenv("TM_REGISTRY", filepath.Join(dir, "registry.yml"))
+			target := filepath.Join(dir, "crowdsec.yml")
+			if name != "missing" {
+				if err := os.WriteFile(target, []byte(c.existing), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			a := answers.Defaults(answers.ModeTMNative)
+			out := fillOutput(target)
+			st := state.New(a, "test", "")
+			in := New(ui.NewPlain(io.Discard), "test")
+			if err := in.writeOutput(a, out, st, nil); err != nil {
+				t.Fatal(err)
+			}
+			data, err := os.ReadFile(target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := string(data) == out.Files[0].Content
+			if got != c.written {
+				t.Fatalf("written = %v, want %v, file is:\n%s", got, c.written, data)
+			}
+			if _, owned := st.OwnedFiles[target]; owned {
+				t.Fatal("a file tm only fills must not be tracked as owned")
+			}
+		})
+	}
+}
+
+func TestReadBouncerStaticMergesAndSchedulesABackup(t *testing.T) {
+	dir := t.TempDir()
+	static := filepath.Join(dir, "traefik.yml")
+	if err := os.WriteFile(static, []byte("api:\n  dashboard: true\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	a := answers.Defaults(answers.ModeTMDocker)
+	a.Mounts.StaticConfig = true
+	a.Mounts.StaticConfigPath = static
+	a.CrowdSec.Mode = answers.CrowdSecConnect
+	a.CrowdSec.BouncerPlugin = true
+	a.Finalize()
+	in := New(ui.NewPlain(io.Discard), "test")
+	got := in.readBouncerStatic(a)
+	if !got.Ready {
+		t.Fatalf("not ready: %s", got.Note)
+	}
+	if got.Mode != 0o600 {
+		t.Fatalf("the original file mode was not kept: %04o", got.Mode)
+	}
+	if !strings.Contains(got.Merged, render.BouncerModule) {
+		t.Fatalf("the plugin was not merged:\n%s", got.Merged)
+	}
+	if in.staticBackup != static {
+		t.Fatalf("no backup scheduled, staticBackup = %q", in.staticBackup)
+	}
+	in.backupStatic()
+	backup, err := os.ReadFile(static + render.BouncerBackupExt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(backup) != "api:\n  dashboard: true\n" {
+		t.Fatalf("the backup is not the original file:\n%s", backup)
+	}
+	if in.staticBackup != "" {
+		t.Fatal("the backup was not cleared")
+	}
+}
+
+func TestReadBouncerStaticSkipsTheModesThatWriteTheirOwn(t *testing.T) {
+	for _, mode := range []answers.Mode{answers.ModeFull, answers.ModeFullNative, answers.ModeAgentDockerTraefik} {
+		a := answers.Defaults(mode)
+		a.CrowdSec.Mode = answers.CrowdSecInstall
+		a.CrowdSec.BouncerPlugin = true
+		in := New(ui.NewPlain(io.Discard), "test")
+		if got := in.readBouncerStatic(a); got.Ready || got.Note != "" {
+			t.Errorf("%s: tm writes its own traefik.yml, nothing to read: %+v", mode, got)
+		}
+	}
+}
+
+func TestReadBouncerStaticReportsAnUnreadableFile(t *testing.T) {
+	a := answers.Defaults(answers.ModeTMDocker)
+	a.Mounts.StaticConfig = true
+	a.Mounts.StaticConfigPath = filepath.Join(t.TempDir(), "nope.yml")
+	a.CrowdSec.Mode = answers.CrowdSecConnect
+	a.CrowdSec.BouncerPlugin = true
+	a.Finalize()
+	in := New(ui.NewPlain(io.Discard), "test")
+	got := in.readBouncerStatic(a)
+	if got.Ready || got.Note == "" {
+		t.Fatalf("a missing static config must be reported: %+v", got)
+	}
+	if plan := render.Bouncer(a, got); plan.Enabled || plan.Note == "" {
+		t.Fatalf("the plugin must not be declared: %+v", plan)
 	}
 }

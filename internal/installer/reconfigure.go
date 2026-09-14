@@ -37,7 +37,9 @@ func (in *Installer) Reconfigure(ctx context.Context, st *state.State, edit func
 	if (st.Mode == answers.ModeTMNative || st.Mode == answers.ModeFullNative) && (a.Native.InstallDir != st.Answers.Native.InstallDir || a.Native.DataDir != st.Answers.Native.DataDir) {
 		return fmt.Errorf("native.install_dir and native.data_dir cannot be changed with reconfigure")
 	}
-	out, err := render.Render(render.Input{Answers: a, User: host.CurrentUser()})
+	static := in.readBouncerStatic(a)
+	in.bouncer = render.Bouncer(a, static)
+	out, err := render.Render(render.Input{Answers: a, User: host.CurrentUser(), Static: static})
 	if err != nil {
 		return err
 	}
@@ -74,7 +76,7 @@ func (in *Installer) Reconfigure(ctx context.Context, st *state.State, edit func
 	}
 	overwrite := map[string]bool{}
 	for _, f := range out.Files {
-		if f.CreateOnly || f.Path == ".env" {
+		if f.CreateOnly || f.Fill || f.Untracked || f.Path == ".env" {
 			continue
 		}
 		if !changed[f.Path] {

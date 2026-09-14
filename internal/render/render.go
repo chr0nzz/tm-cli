@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -15,6 +16,8 @@ type File struct {
 	Mode       fs.FileMode
 	Content    string
 	CreateOnly bool
+	Fill       bool
+	Untracked  bool
 	Privileged bool
 }
 
@@ -26,6 +29,7 @@ type Output struct {
 type Input struct {
 	Answers *answers.Answers
 	User    string
+	Static  Static
 }
 
 const (
@@ -53,21 +57,22 @@ func Render(in Input) (*Output, error) {
 	if a == nil {
 		return nil, errors.New("render: answers are required")
 	}
+	plan := Bouncer(a, in.Static)
 	switch a.Mode {
 	case answers.ModeFull:
-		return renderFull(a)
+		return renderFull(a, plan)
 	case answers.ModeFullNative:
-		return renderFullNative(a)
+		return renderFullNative(a, plan)
 	case answers.ModeTMDocker:
-		return renderTMDocker(a)
+		return renderTMDocker(a, plan)
 	case answers.ModeTMNative:
-		return renderTMNative(a, in.User)
+		return renderTMNative(a, in.User, plan)
 	case answers.ModeAgentDocker:
-		return renderAgentDocker(a)
+		return renderAgentDocker(a, plan)
 	case answers.ModeAgentDockerTraefik:
-		return renderAgentDockerTraefik(a)
+		return renderAgentDockerTraefik(a, plan)
 	case answers.ModeAgentBinary:
-		return renderAgentBinary(a)
+		return renderAgentBinary(a, plan)
 	}
 	return nil, fmt.Errorf("render: unknown mode %q", a.Mode)
 }
@@ -120,6 +125,46 @@ func (b *builder) system(p string, mode fs.FileMode, content string) {
 
 func (b *builder) systemSeed(p string, mode fs.FileMode, content string) {
 	b.add(File{Path: p, Mode: mode, Content: content, CreateOnly: true, Privileged: true})
+}
+
+func (b *builder) dynamicFile(p string, privileged bool, dash dashboardView) {
+	f := File{Path: p, Mode: 0o644, CreateOnly: true, Privileged: privileged}
+	if dash.Bouncer != nil {
+		f.CreateOnly, f.Fill = false, true
+	}
+	b.render(f, "dynamic.yml.tmpl", dash)
+}
+
+func (b *builder) bouncerStatic(plan BouncerPlan) {
+	if !plan.Enabled || plan.StaticMerged == "" {
+		return
+	}
+	b.add(File{
+		Path:       plan.StaticPath,
+		Mode:       plan.StaticMode,
+		Content:    plan.StaticMerged,
+		Untracked:  true,
+		Privileged: filepath.IsAbs(plan.StaticPath),
+	})
+}
+
+func (b *builder) bouncerMiddleware(a *answers.Answers, plan BouncerPlan) {
+	if !plan.Enabled || plan.MiddlewarePath == "" || plan.Inline {
+		return
+	}
+	b.render(File{
+		Path:       plan.MiddlewarePath,
+		Mode:       0o644,
+		Fill:       plan.Fill,
+		Privileged: filepath.IsAbs(plan.MiddlewarePath),
+	}, "crowdsec.yml.tmpl", newBouncerView(a, plan))
+}
+
+func dashboardBouncer(a *answers.Answers, plan BouncerPlan, dash dashboardView) dashboardView {
+	if plan.Enabled && plan.Inline {
+		dash.Bouncer = newBouncerView(a, plan)
+	}
+	return dash
 }
 
 func (b *builder) render(f File, name string, data any) {
@@ -285,10 +330,11 @@ type traefikView struct {
 	DynamicDir  string
 	AcmeStorage string
 	AccessLog   string
+	Plugin      *pluginView
 }
 
-func newTraefikView(a *answers.Answers) traefikView {
-	return traefikView{
+func newTraefikView(a *answers.Answers, plan BouncerPlan) traefikView {
+	v := traefikView{
 		Dashboard:   a.Dashboard,
 		TLS:         a.TLS.Method != answers.TLSNone,
 		DNS:         a.TLS.Method == answers.TLSDNS,
@@ -302,10 +348,14 @@ func newTraefikView(a *answers.Answers) traefikView {
 		AcmeStorage: "/acme.json",
 		AccessLog:   "/logs/access.log",
 	}
+	if plan.Enabled {
+		v.Plugin = newPluginView(plan)
+	}
+	return v
 }
 
-func newNativeTraefikView(a *answers.Answers) traefikView {
-	v := newTraefikView(a)
+func newNativeTraefikView(a *answers.Answers, plan BouncerPlan) traefikView {
+	v := newTraefikView(a, plan)
 	v.Network = ""
 	v.APIAddress = "127.0.0.1:" + a.Network.TraefikAPIPort
 	v.Ping = true

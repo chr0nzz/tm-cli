@@ -514,3 +514,29 @@ func TestFreeOfLAPIRejectsTheCrowdSecPort(t *testing.T) {
 		t.Error("a non-port must be rejected")
 	}
 }
+
+func TestReviewShowsTheBouncerPlugin(t *testing.T) {
+	a := answers.Defaults(answers.ModeFull)
+	a.Domain = "example.com"
+	a.TLS.Email = "me@example.com"
+	a.CrowdSec.Mode = answers.CrowdSecInstall
+	a.CrowdSec.BouncerPlugin = true
+	a.Finalize()
+	if got := crowdsecValue(a); got != "install alongside  bouncer plugin" {
+		t.Fatalf("review value = %q", got)
+	}
+	a.CrowdSec.BouncerPlugin = false
+	if got := crowdsecValue(a); got != "install alongside" {
+		t.Fatalf("review value = %q", got)
+	}
+	b := answers.Defaults(answers.ModeTMNative)
+	b.CrowdSec.Mode = answers.CrowdSecConnect
+	b.CrowdSec.LAPIURL = "http://10.0.0.5:8080"
+	b.Mounts.StaticConfig = true
+	b.Restart.Method = answers.RestartPoisonPill
+	b.CrowdSec.BouncerPlugin = true
+	b.Finalize()
+	if got := crowdsecValue(b); got != "connect  http://10.0.0.5:8080  bouncer plugin" {
+		t.Fatalf("review value = %q", got)
+	}
+}

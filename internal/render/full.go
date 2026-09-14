@@ -23,7 +23,7 @@ type fullView struct {
 	CrowdSec        *crowdsecView
 }
 
-func renderFull(a *answers.Answers) (*Output, error) {
+func renderFull(a *answers.Answers, plan BouncerPlan) (*Output, error) {
 	b := &builder{}
 	install := a.CrowdSec.Mode == answers.CrowdSecInstall
 	single := a.Config.Layout == answers.LayoutSingle
@@ -36,9 +36,9 @@ func renderFull(a *answers.Answers) (*Output, error) {
 	}
 	b.tmpl("docker-compose.yml", 0o644, "compose-full.tmpl", newFullView(a))
 	b.env(a)
-	b.tmpl("traefik/traefik.yml", 0o644, "traefik.yml.tmpl", newTraefikView(a))
+	b.tmpl("traefik/traefik.yml", 0o644, "traefik.yml.tmpl", newTraefikView(a, plan))
 	if single {
-		b.seedTmpl("traefik/config/dynamic.yml", 0o644, "dynamic.yml.tmpl", dashboardView{})
+		b.dynamicFile("traefik/config/dynamic.yml", false, dashboardBouncer(a, plan, dashboardView{}))
 	} else {
 		b.seedTmpl("traefik/config/example-app.yml.disabled", 0o644, "example-app.yml.tmpl", nil)
 	}
@@ -47,6 +47,7 @@ func renderFull(a *answers.Answers) (*Output, error) {
 	if install {
 		b.acquisDocker()
 	}
+	b.bouncerMiddleware(a, plan)
 	return b.result()
 }
 

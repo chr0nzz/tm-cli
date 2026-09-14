@@ -8,11 +8,14 @@ import (
 	"charm.land/huh/v2"
 
 	"github.com/chr0nzz/tm-cli/internal/answers"
+	"github.com/chr0nzz/tm-cli/internal/render"
 )
 
 const (
 	crowdsecInfo      = "CrowdSec detects intrusions and bans malicious IPs. Visible in the CrowdSec tab in Traefik Manager."
 	crowdsecNoBouncer = "tm does not attach the CrowdSec bouncer to Traefik, so decisions are visible but not enforced yet."
+	bouncerAsk        = "Install the CrowdSec bouncer plugin for Traefik?"
+	bouncerInfo       = "Declares the plugin in traefik.yml and writes a crowdsec middleware. You attach that middleware to your own routers, tm never touches them."
 
 	nativeInstallLabel = "Install on this server (CrowdSec package)"
 
@@ -186,7 +189,10 @@ func (w *wizard) crowdSecManager(installLabel string, askLogPath bool, check fun
 		return err
 	}
 	if a.CrowdSec.Mode == answers.CrowdSecConnect {
-		return w.crowdsecConnectManager(a.Mode.CrowdSecLAPIURL(), check)
+		if err := w.crowdsecConnectManager(a.Mode.CrowdSecLAPIURL(), check); err != nil {
+			return err
+		}
+		return w.bouncerPlugin()
 	}
 	if askLogPath {
 		a.Mounts.AccessLogPath = orDefault(a.Mounts.AccessLogPath, answers.DefaultAccessLogPath)
@@ -198,8 +204,28 @@ func (w *wizard) crowdSecManager(installLabel string, askLogPath bool, check fun
 		w.u.Warn("CrowdSec reads Traefik access logs - enabling access log mount.")
 		a.Mounts.AccessLogs = true
 	}
+	if err := w.form(alertLimitInput(a)); err != nil {
+		return err
+	}
+	return w.bouncerPlugin()
+}
+
+func (w *wizard) bouncerPlugin() error {
+	a := w.a
+	if !a.BouncerPluginAvailable() {
+		a.CrowdSec.BouncerPlugin = false
+		w.u.Info(crowdsecNoBouncer)
+		return nil
+	}
+	if err := w.groups(huh.NewGroup(confirm(bouncerAsk, &a.CrowdSec.BouncerPlugin)).Description(bouncerInfo)); err != nil {
+		return err
+	}
+	if a.CrowdSec.BouncerPlugin {
+		w.u.Info("nothing is blocked until you add " + render.BouncerRef + " to a router's middlewares.")
+		return nil
+	}
 	w.u.Info(crowdsecNoBouncer)
-	return w.form(alertLimitInput(a))
+	return nil
 }
 
 func (w *wizard) fullCrowdSec() error {
@@ -603,16 +629,23 @@ func (w *wizard) agentCrowdSec() error {
 				return err
 			}
 		}
-		w.u.Info(crowdsecNoBouncer)
-		return w.form(alertLimitInput(a))
+		if err := w.form(alertLimitInput(a)); err != nil {
+			return err
+		}
+		return w.bouncerPlugin()
 	case answers.CrowdSecConnect:
 		a.CrowdSec.LAPIURL = orDefault(a.CrowdSec.LAPIURL, a.Mode.CrowdSecLAPIURL())
-		return w.form(
+		err := w.form(
 			requiredInput("LAPI URL", &a.CrowdSec.LAPIURL, "a lapi url is required"),
 			w.secret(answers.SecretCrowdSecAPIKey, "API key", "a crowdsec api key is required"),
 			alertLimitInput(a),
 		)
+		if err != nil {
+			return err
+		}
+		return w.bouncerPlugin()
 	}
+	a.CrowdSec.BouncerPlugin = false
 	return nil
 }
 

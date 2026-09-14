@@ -20,7 +20,7 @@ type tmView struct {
 	CrowdSec     *crowdsecView
 }
 
-func renderTMDocker(a *answers.Answers) (*Output, error) {
+func renderTMDocker(a *answers.Answers, plan BouncerPlan) (*Output, error) {
 	install := a.CrowdSec.Mode == answers.CrowdSecInstall
 	b := &builder{}
 	b.dir("config")
@@ -31,11 +31,13 @@ func renderTMDocker(a *answers.Answers) (*Output, error) {
 	b.tmpl("docker-compose.yml", 0o644, "compose-tm.tmpl", newTMView(a))
 	b.env(a)
 	if a.Config.Layout == answers.LayoutSingle {
-		b.seedTmpl("config/dynamic.yml", 0o644, "dynamic.yml.tmpl", dashboardView{})
+		b.dynamicFile("config/dynamic.yml", false, dashboardBouncer(a, plan, dashboardView{}))
 	}
 	if install {
 		b.acquisDocker()
 	}
+	b.bouncerStatic(plan)
+	b.bouncerMiddleware(a, plan)
 	return b.result()
 }
 
@@ -138,7 +140,7 @@ type restartWatcherView struct {
 	ServiceArg    string
 }
 
-func renderTMNative(a *answers.Answers, user string) (*Output, error) {
+func renderTMNative(a *answers.Answers, user string, plan BouncerPlan) (*Output, error) {
 	static := a.Mounts.StaticConfig
 	pill := static && a.Restart.Method == answers.RestartPoisonPill
 	socket := static && a.Restart.Method == answers.RestartSocket
@@ -195,5 +197,7 @@ func renderTMNative(a *answers.Answers, user string) (*Output, error) {
 	if len(a.SecretKeys()) > 0 {
 		b.system(NativeEnvPath, 0o600, EnvFile(a))
 	}
+	b.bouncerStatic(plan)
+	b.bouncerMiddleware(a, plan)
 	return b.result()
 }

@@ -107,7 +107,7 @@ func (in *Installer) crowdsecSummary(a *answers.Answers) {
 	} else {
 		u.Info("Enable the CrowdSec tab in Traefik Manager under Settings to view decisions and alerts.")
 	}
-	u.Warn("tm does not attach the CrowdSec bouncer to Traefik, so nothing is blocked yet - the CrowdSec tab shows what it detects.")
+	in.bouncerSummary(a)
 }
 
 func (in *Installer) summaryFull(a *answers.Answers) {

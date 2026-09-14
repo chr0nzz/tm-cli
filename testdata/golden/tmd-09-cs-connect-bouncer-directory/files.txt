@@ -1,0 +1,4 @@
+docker-compose.yml 0644
+.env 0600
+/opt/traefik/traefik.yml 0644 untracked privileged
+config/crowdsec.yml 0644

@@ -3,6 +3,7 @@ package installer
 import (
 	"context"
 	"fmt"
+	"net"
 	"strings"
 	"time"
 
@@ -45,9 +46,55 @@ func nativeCrowdSecNeeded(a *answers.Answers) bool {
 	return a.Mode.IsSystemd() && a.CrowdSec.Mode == answers.CrowdSecInstall
 }
 
+const (
+	crowdsecConfigLocal      = "/etc/crowdsec/config.yaml.local"
+	crowdsecCredentialsLocal = "/etc/crowdsec/local_api_credentials.yaml.local"
+)
+
+func (in *Installer) checkLAPIPortFree(a *answers.Answers) error {
+	if !nativeCrowdSecNeeded(a) {
+		return nil
+	}
+	port := a.NativeLAPIPort()
+	if !portInUse(port) {
+		return nil
+	}
+	return fmt.Errorf("something is already listening on 127.0.0.1:%s, which is where the CrowdSec local API binds: free that port, or set crowdsec.lapi_port to another one", port)
+}
+
+func portInUse(port string) bool {
+	c, err := net.DialTimeout("tcp", "127.0.0.1:"+port, 2*time.Second)
+	if err != nil {
+		return false
+	}
+	c.Close()
+	return true
+}
+
+func (in *Installer) setCrowdSecLAPIPort(ctx context.Context, a *answers.Answers) error {
+	port := a.NativeLAPIPort()
+	if port == answers.NativeLAPIPort {
+		return nil
+	}
+	listen := "127.0.0.1:" + port
+	cfg := "api:\n  server:\n    listen_uri: " + listen + "\n"
+	if err := host.WriteFile(crowdsecConfigLocal, []byte(cfg), 0o644); err != nil {
+		return fmt.Errorf("set the CrowdSec local API port: %w", err)
+	}
+	creds := "url: http://" + listen + "\n"
+	if err := host.WriteFile(crowdsecCredentialsLocal, []byte(creds), 0o600); err != nil {
+		return fmt.Errorf("point the local CrowdSec agent at %s: %w", listen, err)
+	}
+	in.UI.OK("CrowdSec local API set to " + listen)
+	return nil
+}
+
 func (in *Installer) installCrowdSecPackage(ctx context.Context, a *answers.Answers) error {
 	if !nativeCrowdSecNeeded(a) {
 		return nil
+	}
+	if err := in.checkLAPIPortFree(a); err != nil {
+		return err
 	}
 	if host.HasCommand("cscli") {
 		in.UI.OK("CrowdSec is already installed on this server")
@@ -62,6 +109,9 @@ func (in *Installer) installCrowdSecPackage(ctx context.Context, a *answers.Answ
 			return fmt.Errorf("install the crowdsec package: %w", err)
 		}
 		in.UI.OK("CrowdSec package installed")
+	}
+	if err := in.setCrowdSecLAPIPort(ctx, a); err != nil {
+		return err
 	}
 	if err := host.Systemctl(ctx, "enable", "--now", crowdsecUnit); err != nil {
 		return err

@@ -1,0 +1,18 @@
+# Traefik dynamic configuration
+# Traefik Manager writes routers, services and middlewares here.
+http:
+  routers:
+    dashboard:
+      rule: "Host(`traefik.example.com`)"
+      entryPoints:
+        - web
+      service: api@internal
+  middlewares:
+    crowdsec:
+      plugin:
+        crowdsec:
+          Enabled: "true"
+          CrowdsecMode: live
+          CrowdsecLapiScheme: http
+          CrowdsecLapiHost: 127.0.0.1:8080
+          CrowdsecLapiKey: crowdsec-api-key-PLACEHOLDER

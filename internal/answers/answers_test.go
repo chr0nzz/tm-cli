@@ -561,3 +561,90 @@ func TestCrowdSecInstallNeedsAnAccessLogPath(t *testing.T) {
 		t.Fatalf("install without a log path must be rejected: %v", err)
 	}
 }
+
+func bouncerAnswers(mode Mode) *Answers {
+	a := Defaults(mode)
+	a.Domain = "example.com"
+	a.Hosts.Manager = "manager.example.com"
+	a.TLS.Email = "me@example.com"
+	a.CrowdSec.Mode = CrowdSecInstall
+	a.CrowdSec.BouncerPlugin = true
+	if mode == ModeFullNative {
+		a.Network.TraefikAPIPort = "8081"
+	}
+	return a
+}
+
+func TestBouncerPluginAvailability(t *testing.T) {
+	for _, mode := range Modes {
+		a := bouncerAnswers(mode)
+		a.Mounts.StaticConfig = false
+		a.Finalize()
+		want := mode.HasTraefik()
+		if got := a.CrowdSec.BouncerPlugin; got != want {
+			t.Errorf("%s without a static config: bouncer_plugin = %v, want %v", mode, got, want)
+		}
+		b := bouncerAnswers(mode)
+		b.Mounts.StaticConfig = true
+		b.Restart.Method = RestartPoisonPill
+		b.Finalize()
+		if !b.CrowdSec.BouncerPlugin {
+			t.Errorf("%s with a static config: bouncer_plugin was cleared", mode)
+		}
+	}
+}
+
+func TestBouncerPluginNeedsCrowdSec(t *testing.T) {
+	a := bouncerAnswers(ModeFull)
+	a.CrowdSec.Mode = CrowdSecNone
+	a.Finalize()
+	if a.CrowdSec.BouncerPlugin {
+		t.Fatal("the bouncer plugin survived crowdsec.mode none")
+	}
+}
+
+func TestBouncerPluginValidation(t *testing.T) {
+	a := bouncerAnswers(ModeFull)
+	a.Finalize()
+	a.CrowdSec.Mode = CrowdSecNone
+	a.CrowdSec.BouncerPlugin = true
+	if err := a.Validate(); err == nil || !strings.Contains(err.Error(), "bouncer_plugin") {
+		t.Fatalf("crowdsec.mode none must be rejected, got %v", err)
+	}
+	b := bouncerAnswers(ModeTMDocker)
+	b.Mounts.StaticConfig = false
+	b.Finalize()
+	b.CrowdSec.BouncerPlugin = true
+	if err := b.Validate(); err == nil || !strings.Contains(err.Error(), "mounts.static_config") {
+		t.Fatalf("a missing static config must be rejected, got %v", err)
+	}
+}
+
+func TestBouncerPluginRoundTrips(t *testing.T) {
+	a := bouncerAnswers(ModeFull)
+	a.Finalize()
+	data, err := a.Dump()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "bouncer_plugin: true") {
+		t.Fatalf("bouncer_plugin missing from the dump:\n%s", data)
+	}
+	back, err := Parse(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !back.CrowdSec.BouncerPlugin {
+		t.Fatal("bouncer_plugin did not survive a round trip")
+	}
+	off := bouncerAnswers(ModeFull)
+	off.CrowdSec.BouncerPlugin = false
+	off.Finalize()
+	data, err = off.Dump()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "bouncer_plugin") {
+		t.Fatalf("the default is omitted from answers files:\n%s", data)
+	}
+}

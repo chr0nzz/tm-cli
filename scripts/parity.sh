@@ -360,13 +360,26 @@ crowdsec_is_new() {
   esac
 }
 
+bouncer_on() {
+  [[ "${ans_crowdsec_bouncer_plugin:-false}" == true ]]
+}
+
+drop_bouncer_paths() {
+  if ! bouncer_on; then
+    cat
+    return
+  fi
+  grep -vxF -e "${ans_mounts_static_config_path:-__no_static_config__}" \
+    | grep -vxE '(.*/)?crowdsec\.yml' || true
+}
+
 golden_paths() {
   if crowdsec_is_new; then
     grep -vxE '(crowdsec/acquis\.yaml|/etc/crowdsec/acquis\.d/traefik\.yaml|/etc/traefik-manager/env)' \
-      <(awk '{print $1}' "$dir/files.txt")
+      <(awk '{print $1}' "$dir/files.txt") | drop_bouncer_paths
     return
   fi
-  awk '{print $1}' "$dir/files.txt"
+  awk '{print $1}' "$dir/files.txt" | drop_bouncer_paths
 }
 
 golden_dirs() {
@@ -393,6 +406,15 @@ strip_crowdsec_compose() {
       print
     }
   ' "$1" > "$1.cs" && mv "$1.cs" "$1"
+}
+
+strip_experimental() {
+  awk '
+    /^experimental:$/ { skip = 1; next }
+    skip && /^[^[:space:]]/ { skip = 0 }
+    skip { next }
+    { print }
+  ' "$1" > "$1.exp" && mv "$1.exp" "$1"
 }
 
 strip_crowdsec_unit() {
@@ -466,6 +488,10 @@ compare_docker_tree() {
         note_dev "$name: $rel seed is a comment instead of the empty http skeleton traefik rejects"
         cp "$norm/$rel.tm" "$norm/$rel"
       fi
+    fi
+    if [[ "$rel" == traefik/traefik.yml ]] && bouncer_on; then
+      note_dev "$name: the legacy script never declared a traefik plugin, the experimental block in $rel is not diffed"
+      strip_experimental "$norm/$rel.tm"
     fi
     if [[ "$rel" == docker-compose.yml ]] && crowdsec_is_new; then
       note_dev "$name: the legacy script never offered crowdsec for ${ans_mode}, its parts of $rel are not diffed"
@@ -632,6 +658,9 @@ run_scenario() {
   export PARITY_ROOT="$root"
   export PARITY_CROWDSEC_API_KEY="${ans_secrets_CROWDSEC_API_KEY:-}"
   export PARITY_CROWDSEC_MACHINE_PASSWORD="${ans_secrets_CROWDSEC_MACHINE_PASSWORD:-}"
+  if bouncer_on; then
+    note_dev "$name: the legacy script never installed the bouncer plugin, so the middleware and the plugin declaration tm writes are not diffed"
+  fi
   PATH="$tmp/bin:$PATH"
   eval "$legacy" 2>/dev/null
   case "${ans_mode:-}" in

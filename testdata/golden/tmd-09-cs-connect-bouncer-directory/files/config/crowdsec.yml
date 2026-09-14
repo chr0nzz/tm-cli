@@ -1,0 +1,14 @@
+http:
+  middlewares:
+    crowdsec:
+      plugin:
+        crowdsec:
+          Enabled: "true"
+          CrowdsecMode: live
+          CrowdsecLapiScheme: http
+          CrowdsecLapiHost: 10.0.0.5:8080
+          CrowdsecLapiKey: crowdsec-api-key-PLACEHOLDER
+          ForwardedHeadersTrustedIPs:
+            - 127.0.0.1/32
+            - 172.17.0.0/16
+            - 100.64.0.0/10
