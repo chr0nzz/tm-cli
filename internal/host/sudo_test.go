@@ -100,7 +100,7 @@ func TestSudoFallbacks(t *testing.T) {
 		"journalctl -u traefik-manager --no-pager -n 50",
 		"useradd --system --no-create-home --shell " + nologinShell() + " traefik-manager",
 		"usermod -aG docker traefik-manager",
-		"-v",
+		"-n true",
 		"cat " + locked,
 		"rm -f " + locked,
 		"rm -rf " + ro,
@@ -150,5 +150,20 @@ func TestDirectPathsSkipSudo(t *testing.T) {
 	}
 	if got := calls(); len(got) != 1 || got[0] != "" {
 		t.Errorf("unexpected sudo calls: %v", got)
+	}
+}
+
+func TestSudoPreflightDoesNotPromptWhenSudoIsPasswordless(t *testing.T) {
+	calls := fakeSudo(t)
+	var logged string
+	if err := SudoPreflight(context.Background(), []string{"systemd unit"}, func(s string) { logged = s }); err != nil {
+		t.Fatalf("SudoPreflight: %v", err)
+	}
+	if logged == "" {
+		t.Error("the reasons must still be announced even when no password is needed")
+	}
+	got := calls()
+	if len(got) != 1 || got[0] != "-n true" {
+		t.Fatalf("preflight must probe with a non-interactive sudo and stop there, got %v", got)
 	}
 }

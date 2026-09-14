@@ -141,8 +141,23 @@ func SudoPreflight(ctx context.Context, reasons []string, log func(string)) erro
 			log("this install uses sudo for privileged steps")
 		}
 	}
+	if Run(Command(ctx, "sudo", "-n", "true")) == nil {
+		return nil
+	}
+	if !terminalAvailable() {
+		return errors.New("sudo needs a password and there is no terminal to ask on: run tm from a terminal, or give this user passwordless sudo for an unattended install")
+	}
 	if err := Run(Command(ctx, "sudo", "-v")); err != nil {
 		return fmt.Errorf("sudo authentication failed: %w", err)
 	}
 	return nil
+}
+
+func terminalAvailable() bool {
+	f, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
+	if err != nil {
+		return false
+	}
+	f.Close()
+	return true
 }
