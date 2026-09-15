@@ -22,6 +22,9 @@ const (
 	layoutInfo = "Single file is simpler. Directory (one .yml per service) is easier at scale."
 	mountsInfo = "Expose extra Traefik data to Traefik Manager for richer visibility."
 	agentPaths = "Expose extra Traefik data to the agent for richer visibility."
+
+	certRemovalAsk  = "Allow removing certificates from the Certs tab?"
+	certRemovalInfo = "Gives write access to acme.json and needs a restart method, because Traefik only reads acme.json at startup."
 )
 
 var deploymentOptions = []huh.Option[string]{
@@ -94,7 +97,7 @@ func (w *wizard) restartMethodDocker(askContainer bool) error {
 	a := w.a
 	fields := []huh.Field{
 		selectOne("How should TM restart Traefik?", &a.Restart.Method, dockerRestartOptions...).
-			Description("TM can restart Traefik automatically when you save static config changes."),
+			Description("TM restarts Traefik after static config changes and certificate removals."),
 	}
 	if askContainer {
 		a.Restart.Container = orDefault(a.Restart.Container, "traefik")
@@ -102,7 +105,15 @@ func (w *wizard) restartMethodDocker(askContainer bool) error {
 	} else {
 		a.Restart.Container = "traefik"
 	}
-	return w.groups(huh.NewGroup(fields...).Title("Static Config Editor"))
+	return w.groups(huh.NewGroup(fields...).Title("Traefik restart"))
+}
+
+func (w *wizard) certRemoval(certs bool) error {
+	if !certs {
+		w.a.Mounts.CertsWritable = false
+		return nil
+	}
+	return w.groups(huh.NewGroup(confirm(certRemovalAsk, &w.a.Mounts.CertsWritable)).Description(certRemovalInfo))
 }
 
 func (w *wizard) fullGeneral() error {
@@ -147,7 +158,10 @@ func (w *wizard) fullMounts() error {
 	if err != nil {
 		return err
 	}
-	if !a.Mounts.StaticConfig {
+	if err := w.certRemoval(a.Mounts.Certs); err != nil {
+		return err
+	}
+	if !a.UsesRestart() {
 		a.Restart.Method = answers.RestartNone
 		return nil
 	}
@@ -305,8 +319,12 @@ func (w *wizard) fnoDomain() error {
 }
 
 func (w *wizard) fnoMounts() error {
-	return w.groups(huh.NewGroup(confirm("Enable the static config editor (traefik.yml)?", &w.a.Mounts.StaticConfig)).
+	err := w.groups(huh.NewGroup(confirm("Enable the static config editor (traefik.yml)?", &w.a.Mounts.StaticConfig)).
 		Description("Lets Traefik Manager edit " + answers.DefaultStaticConfigPath + " and restart Traefik after saving."))
+	if err != nil {
+		return err
+	}
+	return w.certRemoval(w.a.TLS.Method != answers.TLSNone)
 }
 
 func (w *wizard) fnoCrowdSec() error {
@@ -391,7 +409,10 @@ func (w *wizard) tmdMounts() error {
 	if err != nil {
 		return err
 	}
-	if !a.Mounts.StaticConfig {
+	if err := w.certRemoval(a.Mounts.Certs); err != nil {
+		return err
+	}
+	if !a.UsesRestart() {
 		a.Restart.Method = answers.RestartNone
 		return nil
 	}
@@ -577,13 +598,27 @@ func (w *wizard) agentPaths() error {
 		)
 	}
 	items = append(items, mount{ask: "Mount plugins directory?", path: "Plugins dir", on: &a.Mounts.Plugins, value: &a.Mounts.PluginsDir, def: answers.DefaultPluginsDir})
-	return w.mounts(info, items)
+	if err := w.mounts(info, items); err != nil {
+		return err
+	}
+	certs := a.Mounts.Certs
+	if a.Mode == answers.ModeAgentDockerTraefik {
+		certs = a.TLS.Method != answers.TLSNone
+	}
+	return w.certRemoval(certs)
 }
 
 func (w *wizard) agentRestart() error {
 	a := w.a
-	err := w.groups(huh.NewGroup(selectOne("Restart method", &a.Restart.Method, agentRestartOptions...)).
-		Description("Allows the agent to restart Traefik after static config changes."))
+	options := agentRestartOptions
+	if a.Mounts.CertsWritable {
+		options = options[1:]
+		if a.Restart.Method == answers.RestartNone {
+			a.Restart.Method = answers.RestartProxy
+		}
+	}
+	err := w.groups(huh.NewGroup(selectOne("Restart method", &a.Restart.Method, options...)).
+		Description("Allows the agent to restart Traefik after static config changes and certificate removals."))
 	if err != nil {
 		return err
 	}

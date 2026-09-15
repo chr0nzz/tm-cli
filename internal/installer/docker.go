@@ -158,7 +158,7 @@ func serviceNames(a *answers.Answers) []string {
 	case answers.ModeAgentDockerTraefik:
 		names = []string{"traefik", "traefik-manager-agent"}
 	}
-	if a.Restart.Method == answers.RestartProxy && (a.Mode == answers.ModeAgentDockerTraefik || (!a.Mode.IsAgent() && a.Mounts.StaticConfig)) {
+	if a.Restart.Method == answers.RestartProxy && (a.Mode == answers.ModeAgentDockerTraefik || (!a.Mode.IsAgent() && a.UsesRestart())) {
 		names = append(names, "socket-proxy")
 	}
 	if a.CrowdSec.Mode == answers.CrowdSecInstall {

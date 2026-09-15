@@ -79,6 +79,9 @@ func inspectUnit(mode answers.Mode) (*State, map[string]string, error) {
 	switch mode {
 	case answers.ModeTMNative, answers.ModeFullNative:
 		applyNativeUnit(a, u, owned)
+		if mode == answers.ModeFullNative {
+			a.Mounts.CertsWritable = a.Mounts.Certs && !a.Mounts.StaticConfig && a.Restart.Method != answers.RestartNone
+		}
 		if mode == answers.ModeFullNative && exists(traefikUnitPath) {
 			if data, err := readFile(traefikUnitPath); err == nil {
 				owned[traefikUnitPath] = Hash(data)
@@ -86,6 +89,7 @@ func inspectUnit(mode answers.Mode) (*State, map[string]string, error) {
 		}
 	case answers.ModeAgentBinary:
 		applyAgentEnv(a, u.env, secrets)
+		a.Mounts.CertsWritable = a.Mounts.Certs && a.Restart.Method != answers.RestartNone
 	}
 	a.Finalize()
 	st := &State{

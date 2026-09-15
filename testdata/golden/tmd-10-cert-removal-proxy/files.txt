@@ -1,0 +1,2 @@
+docker-compose.yml 0644
+config/dynamic.yml 0644 create-only

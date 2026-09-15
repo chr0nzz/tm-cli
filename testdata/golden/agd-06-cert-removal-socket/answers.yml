@@ -1,0 +1,22 @@
+mode: agent-docker
+dir: /opt/traefik-manager-agent
+tls:
+  method: none
+agent:
+  traefik_url: http://traefik:8080
+  config_path: /etc/traefik/dynamic
+  port: "8090"
+mounts:
+  access_logs: false
+  certs: true
+  acme_path: /etc/traefik/acme.json
+  certs_writable: true
+  static_config: false
+  plugins: false
+restart:
+  method: socket
+  container: traefik
+crowdsec:
+  mode: none
+secrets:
+  TMA_API_KEY: tma-api-key-PLACEHOLDER

@@ -63,7 +63,7 @@ func (in *Installer) installFullNative(ctx context.Context, a *answers.Answers, 
 		return err
 	}
 	in.UI.OK("Traefik service enabled and started")
-	if a.Mounts.StaticConfig {
+	if a.UsesRestart() {
 		if err := host.Systemctl(ctx, "enable", "--now", restartPathUnit); err != nil {
 			return err
 		}

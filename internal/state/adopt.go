@@ -151,6 +151,7 @@ func (ad *adopter) full(tm, traefik *service) {
 	a.Config.Layout = layoutOf(tm, "/app/config/dynamic.yml", "/app/config/dynamic")
 	a.Mounts.AccessLogs = mounted(tm, "ACCESS_LOG_PATH", "/app/logs", "/app/logs/access.log")
 	a.Mounts.Certs = mounted(tm, "ACME_JSON_PATH", "/app/acme.json")
+	a.Mounts.CertsWritable = tm.mountWritable("/app/acme.json")
 	a.Mounts.StaticConfig = mounted(tm, "STATIC_CONFIG_PATH", "/app/traefik.yml")
 	a.Mounts.Plugins = tm.Environment.has("PLUGINS_DIR")
 	ad.restart(tm, traefik)
@@ -172,6 +173,7 @@ func (ad *adopter) tmDocker(tm *service) {
 	a.Config.Layout = layoutOf(tm, "/app/config/dynamic.yml", "/app/config/dynamic")
 	a.Mounts.AccessLogs, a.Mounts.AccessLogPath = mountedPath(tm, "ACCESS_LOG_PATH", a.Mounts.AccessLogPath, "/app/logs/access.log", "/app/logs")
 	a.Mounts.Certs, a.Mounts.AcmePath = mountedPath(tm, "ACME_JSON_PATH", a.Mounts.AcmePath, "/app/acme.json")
+	a.Mounts.CertsWritable = tm.mountWritable("/app/acme.json")
 	a.Mounts.StaticConfig, a.Mounts.StaticConfigPath = mountedPath(tm, "STATIC_CONFIG_PATH", a.Mounts.StaticConfigPath, "/app/traefik.yml")
 	a.Mounts.Plugins, a.Mounts.PluginsDir = envPath(tm.Environment, "PLUGINS_DIR", a.Mounts.PluginsDir)
 	ad.restart(tm, nil)
@@ -187,6 +189,7 @@ func (ad *adopter) agentDocker(agent *service) {
 	}
 	a.Agent.ConfigPath = hostSide(agent, a.Agent.ConfigPath)
 	if a.Mounts.Certs {
+		a.Mounts.CertsWritable = agent.mountWritable(a.Mounts.AcmePath)
 		a.Mounts.AcmePath = hostSide(agent, a.Mounts.AcmePath)
 	}
 	if a.Mounts.AccessLogs {
@@ -217,6 +220,7 @@ func (ad *adopter) agentTraefik(agent, traefik *service) {
 	ad.tls(traefik, agent, traefik)
 	a.Config.Layout = layoutOf(agent, "/etc/traefik/config/dynamic.yml", "/etc/traefik/config")
 	applyAgentEnv(a, agent.Environment, ad.secrets)
+	a.Mounts.CertsWritable = agent.mountWritable(answers.DefaultAcmePath)
 	if p := agent.hostPort("8090"); p != "" {
 		a.Agent.Port = p
 	}

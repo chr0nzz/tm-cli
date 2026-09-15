@@ -661,6 +661,10 @@ run_scenario() {
   if bouncer_on; then
     note_dev "$name: the legacy script never installed the bouncer plugin, so the middleware and the plugin declaration tm writes are not diffed"
   fi
+  if [[ "${ans_mounts_certs_writable:-false}" == "true" ]]; then
+    note_dev "$name: the legacy script never offered certificate removal, nothing to diff"
+    return 0
+  fi
   PATH="$tmp/bin:$PATH"
   eval "$legacy" 2>/dev/null
   case "${ans_mode:-}" in

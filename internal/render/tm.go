@@ -43,9 +43,10 @@ func renderTMDocker(a *answers.Answers, plan BouncerPlan) (*Output, error) {
 
 func newTMView(a *answers.Answers) tmView {
 	static := a.Mounts.StaticConfig
-	proxy := static && a.Restart.Method == answers.RestartProxy
-	pill := static && a.Restart.Method == answers.RestartPoisonPill
-	socket := static && a.Restart.Method == answers.RestartSocket
+	restart := a.UsesRestart()
+	proxy := restart && a.Restart.Method == answers.RestartProxy
+	pill := restart && a.Restart.Method == answers.RestartPoisonPill
+	socket := restart && a.Restart.Method == answers.RestartSocket
 	single := a.Config.Layout == answers.LayoutSingle
 	install := a.CrowdSec.Mode == answers.CrowdSecInstall
 	v := tmView{
@@ -71,13 +72,13 @@ func newTMView(a *answers.Answers) tmView {
 		v.Volumes = append(v.Volumes, a.Mounts.AccessLogPath+":/app/logs/access.log:ro")
 	}
 	if a.Mounts.Certs {
-		v.Volumes = append(v.Volumes, a.Mounts.AcmePath+":/app/acme.json:ro")
+		v.Volumes = append(v.Volumes, a.Mounts.AcmePath+":/app/acme.json"+acmeMountMode(a))
 	}
 	if static {
 		v.Volumes = append(v.Volumes, a.Mounts.StaticConfigPath+":/app/traefik.yml")
-		if pill {
-			v.Volumes = append(v.Volumes, "tm-signals:/signals")
-		}
+	}
+	if pill {
+		v.Volumes = append(v.Volumes, "tm-signals:/signals")
 	}
 	if single {
 		v.Volumes = append(v.Volumes, "./config/dynamic.yml:/app/config/dynamic.yml")

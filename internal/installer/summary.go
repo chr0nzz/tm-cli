@@ -44,11 +44,18 @@ func (in *Installer) printPassword(logsHint string) {
 }
 
 func (in *Installer) staticConfigSummary(a *answers.Answers) {
-	if !a.Mounts.StaticConfig {
+	if !a.UsesRestart() {
 		return
 	}
 	u := in.UI
-	u.Heading("Static Config Editor")
+	if a.Mounts.StaticConfig {
+		u.Heading("Static Config Editor")
+	} else {
+		u.Heading("Certificate removal")
+	}
+	if a.Mounts.CertsWritable {
+		u.Line("%s", ui.MutedStyle.Render("Traefik Manager can write acme.json, so the Certs tab can remove certificates. Each removal restarts Traefik."))
+	}
 	switch a.Restart.Method {
 	case answers.RestartProxy:
 		u.KVMuted("Restart method", "socket proxy (tecnativa/docker-socket-proxy)")

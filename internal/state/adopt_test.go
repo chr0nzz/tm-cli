@@ -509,3 +509,41 @@ func TestImageTag(t *testing.T) {
 		}
 	}
 }
+
+func TestAdoptTMDockerCertRemoval(t *testing.T) {
+	st, _, _ := adopt(t, "tm-docker-certs")
+	a := st.Answers
+	m := a.Mounts
+	if !m.Certs || !m.CertsWritable || m.AcmePath != "/srv/traefik/acme.json" || m.StaticConfig {
+		t.Fatalf("mounts: %+v", m)
+	}
+	if a.Restart.Method != answers.RestartSocket {
+		t.Fatalf("restart without a static config was dropped: %+v", a.Restart)
+	}
+	if err := a.Validate(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestMountWritable(t *testing.T) {
+	c, err := parseCompose([]byte("services:\n  traefik-manager:\n    image: ghcr.io/chr0nzz/traefik-manager:latest\n    volumes:\n      - /a/acme.json:/app/a.json:ro,z\n      - /b/acme.json:/app/b.json:rw\n      - /c/acme.json:/app/c.json\n      - type: bind\n        source: /d/acme.json\n        target: /app/d.json\n        read_only: true\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tm := c.find(imageTM)
+	want := map[string]bool{"/app/a.json": false, "/app/b.json": true, "/app/c.json": true, "/app/d.json": false, "/app/missing.json": false}
+	for target, writable := range want {
+		if got := tm.mountWritable(target); got != writable {
+			t.Errorf("mountWritable(%s) = %v, want %v", target, got, writable)
+		}
+	}
+}
+
+func TestAdoptReadOnlyAcmeIsNotWritable(t *testing.T) {
+	for _, fixture := range []string{"tm-docker", "full", "agent-docker", "agent-docker-traefik"} {
+		st, _, _ := adopt(t, fixture)
+		if st.Answers.Mounts.CertsWritable {
+			t.Errorf("%s: a :ro acme.json mount was adopted as writable", fixture)
+		}
+	}
+}

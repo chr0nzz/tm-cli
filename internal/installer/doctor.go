@@ -210,7 +210,12 @@ func (in *Installer) checks(st *state.State) []Check {
 			return true, acme
 		}, Advice: "chmod 600 " + acme})
 	}
-	if a.Mounts.StaticConfig && a.Restart.Method == answers.RestartPoisonPill {
+	if a.Mounts.CertsWritable {
+		if c, ok := acmeWritableCheck(st); ok {
+			checks = append(checks, c)
+		}
+	}
+	if a.UsesRestart() && a.Restart.Method == answers.RestartPoisonPill {
 		switch {
 		case (st.Mode == answers.ModeTMNative || st.Mode == answers.ModeFullNative) && a.Restart.TraefikSystemd:
 			checks = append(checks, Check{Name: "traefik-restart.path active", Run: func(ctx context.Context) (bool, string) {
@@ -320,6 +325,45 @@ func acmePath(st *state.State) string {
 		}
 	}
 	return ""
+}
+
+func acmeWritableCheck(st *state.State) (Check, bool) {
+	a := &st.Answers
+	name := "acme.json writable by traefik manager"
+	switch st.Mode {
+	case answers.ModeFullNative:
+		return Check{Name: name, Run: func(ctx context.Context) (bool, string) {
+			owner, err := host.FileOwner(answers.NativeAcmePath)
+			if err != nil {
+				return false, err.Error()
+			}
+			if owner != nativeUser {
+				return false, answers.NativeAcmePath + " is owned by " + owner
+			}
+			return true, answers.NativeAcmePath
+		}, Advice: "sudo chown " + nativeUser + ": " + answers.NativeAcmePath}, true
+	case answers.ModeFull, answers.ModeTMDocker, answers.ModeAgentDocker, answers.ModeAgentDockerTraefik:
+	default:
+		return Check{}, false
+	}
+	container, target, section := "traefik-manager", "/app/acme.json", "mounts"
+	switch st.Mode {
+	case answers.ModeAgentDocker:
+		container, target, section = "traefik-manager-agent", a.Mounts.AcmePath, "paths"
+	case answers.ModeAgentDockerTraefik:
+		container, target, section = "traefik-manager-agent", answers.DefaultAcmePath, "paths"
+	}
+	format := fmt.Sprintf("{{range .Mounts}}{{if eq .Destination %q}}{{.RW}}{{end}}{{end}}", target)
+	return Check{Name: name, Run: func(ctx context.Context) (bool, string) {
+		out, err := host.Output(host.DockerCommand(ctx, "inspect", "-f", format, container))
+		if err != nil {
+			return false, err.Error()
+		}
+		if strings.TrimSpace(out) != "true" {
+			return false, target + " is not mounted read-write in " + container
+		}
+		return true, container + ":" + target
+	}, Advice: "tm reconfigure --section " + section}, true
 }
 
 func dirWritableBy(path, username string) (bool, string) {

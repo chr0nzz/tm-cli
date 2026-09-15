@@ -1,0 +1,2 @@
+docker-compose.yml 0644
+.env 0600

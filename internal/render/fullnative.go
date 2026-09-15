@@ -58,8 +58,10 @@ func newFullNativeTMView(a *answers.Answers) nativeView {
 	}
 	v.OptionalEnv = append(v.OptionalEnv, SystemdQuote("ACCESS_LOG_PATH="+a.Mounts.AccessLogPath))
 	if a.Mounts.StaticConfig {
+		v.OptionalEnv = append(v.OptionalEnv, SystemdQuote("STATIC_CONFIG_PATH="+a.Mounts.StaticConfigPath))
+	}
+	if a.UsesRestart() {
 		v.OptionalEnv = append(v.OptionalEnv,
-			SystemdQuote("STATIC_CONFIG_PATH="+a.Mounts.StaticConfigPath),
 			SystemdQuote("RESTART_METHOD="+a.Restart.Method),
 			SystemdQuote("SIGNAL_FILE_PATH="+a.Restart.SignalFile),
 		)
@@ -88,7 +90,7 @@ func nativeCrowdSecEnv(a *answers.Answers) []string {
 func renderFullNative(a *answers.Answers, plan BouncerPlan) (*Output, error) {
 	tls := a.TLS.Method != answers.TLSNone
 	single := a.Config.Layout == answers.LayoutSingle
-	static := a.Mounts.StaticConfig
+	restart := a.UsesRestart()
 
 	b := &builder{}
 	b.dir(answers.NativeTraefikConfigDir)
@@ -97,7 +99,7 @@ func renderFullNative(a *answers.Answers, plan BouncerPlan) (*Output, error) {
 	b.dir(filepath.Join(answers.NativeTraefikStateDir, "plugins-storage"))
 	b.dir(answers.NativeTraefikLogDir)
 	b.dir(filepath.Join(a.Native.DataDir, "backups"))
-	if static {
+	if restart {
 		b.dir(filepath.Dir(a.Restart.SignalFile))
 	}
 	if a.CrowdSec.Mode == answers.CrowdSecInstall {
@@ -106,7 +108,7 @@ func renderFullNative(a *answers.Answers, plan BouncerPlan) (*Output, error) {
 	b.systemTmpl(answers.DefaultStaticConfigPath, 0o644, "traefik.yml.tmpl", newNativeTraefikView(a, plan))
 	b.systemTmpl(TraefikUnitPath, 0o644, "traefik.service.tmpl", newTraefikUnitView(a))
 	b.systemTmpl(NativeUnitPath, 0o644, "tm.service.tmpl", newFullNativeTMView(a))
-	if static {
+	if restart {
 		w := restartWatcherView{
 			SignalFile:    a.Restart.SignalFile,
 			SignalFileArg: SystemdQuote(a.Restart.SignalFile),

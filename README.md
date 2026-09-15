@@ -106,6 +106,8 @@ crowdsec:
   mode: install
 ```
 
+`mounts.certs_writable: true` lets the Certs tab remove certificates: `acme.json` is mounted read-write and a `restart.method` is required, because Traefik only reads it at startup. Not available for `tm-native`.
+
 `tm install --dump-answers answers.yml` writes the answers of a wizard run to a file (no secrets) to start from. DNS providers: `cloudflare`, `route53`, `digitalocean`, `namecheap`, `duckdns`, `desec`, or `other` with `lego_provider`, `vars` and `secret_vars` for any other lego provider.
 
 Secrets come from environment variables of the same name (`CF_DNS_API_TOKEN=... tm install --answers answers.yml --yes`) or a `secrets:` map in the answers file. A missing required secret is asked for on a terminal; without one the install stops and lists the names.

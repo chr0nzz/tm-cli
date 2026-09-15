@@ -154,6 +154,7 @@ type Mounts struct {
 	AccessLogPath    string `yaml:"access_log_path,omitempty"`
 	Certs            bool   `yaml:"certs"`
 	AcmePath         string `yaml:"acme_path,omitempty"`
+	CertsWritable    bool   `yaml:"certs_writable,omitempty"`
 	StaticConfig     bool   `yaml:"static_config"`
 	StaticConfigPath string `yaml:"static_config_path,omitempty"`
 	Plugins          bool   `yaml:"plugins"`
@@ -385,9 +386,10 @@ func (a *Answers) Finalize() {
 	if a.TLS.Method == TLSNone {
 		a.TLS.Email = ""
 	}
+	a.finalizeCertRemoval()
 	switch a.Mode {
 	case ModeFull:
-		if !a.Mounts.StaticConfig {
+		if !a.UsesRestart() {
 			a.Restart.Method = RestartNone
 		}
 		a.Restart.Container = "traefik"
@@ -403,7 +405,8 @@ func (a *Answers) Finalize() {
 		a.Mounts.AcmePath = NativeAcmePath
 		a.Mounts.StaticConfigPath = DefaultStaticConfigPath
 		a.Mounts.Plugins = false
-		if a.Mounts.StaticConfig {
+		a.finalizeCertRemoval()
+		if a.UsesRestart() {
 			a.Restart.Method = RestartPoisonPill
 			a.Restart.TraefikSystemd = true
 			a.Restart.TraefikService = "traefik"
@@ -430,7 +433,7 @@ func (a *Answers) Finalize() {
 		} else {
 			a.TLS = TLS{Method: TLSNone}
 		}
-		if !a.Mounts.StaticConfig {
+		if !a.UsesRestart() {
 			a.Restart.Method = RestartNone
 		}
 	case ModeTMNative:
@@ -452,6 +455,7 @@ func (a *Answers) Finalize() {
 		a.Mounts.Certs = a.TLS.Method != TLSNone
 		a.Mounts.AcmePath = DefaultAcmePath
 		a.Mounts.StaticConfig = false
+		a.finalizeCertRemoval()
 		if !a.Dashboard {
 			a.Hosts.Dashboard = ""
 		}
@@ -521,6 +525,16 @@ func (a *Answers) BouncerPluginAvailable() bool {
 		return false
 	}
 	return a.Mode.HasTraefik() || a.Mounts.StaticConfig
+}
+
+func (a *Answers) UsesRestart() bool {
+	return a.Mounts.StaticConfig || a.Mounts.CertsWritable
+}
+
+func (a *Answers) finalizeCertRemoval() {
+	if !a.Mounts.Certs {
+		a.Mounts.CertsWritable = false
+	}
 }
 
 func expandHome(p string) string {
@@ -608,6 +622,14 @@ func (a *Answers) Validate() error {
 	}
 	if a.Mounts.StaticConfig && a.Restart.Method == RestartNone && !a.Mode.IsAgent() {
 		return fmt.Errorf("restart.method is required when mounts.static_config is true (proxy, poison-pill, or socket)")
+	}
+	if a.Mounts.CertsWritable {
+		if a.Mode == ModeTMNative {
+			return fmt.Errorf("mounts.certs_writable is not available for tm-native: Traefik refuses an acme.json that another user can write, use full-native or tm-docker")
+		}
+		if a.Restart.Method == RestartNone {
+			return fmt.Errorf("restart.method is required when mounts.certs_writable is true, Traefik only reads acme.json at startup (proxy, poison-pill, or socket)")
+		}
 	}
 	if err := a.validateNames(); err != nil {
 		return err
@@ -933,7 +955,7 @@ func (a *Answers) validatePaths() error {
 		{"mounts.acme_path", a.Mounts.AcmePath, a.Mounts.Certs && !a.Mode.HasTraefik()},
 		{"mounts.static_config_path", a.Mounts.StaticConfigPath, a.Mounts.StaticConfig && !a.Mode.HasTraefik()},
 		{"mounts.plugins_dir", a.Mounts.PluginsDir, a.Mounts.Plugins},
-		{"restart.signal_file", a.Restart.SignalFile, a.Mounts.StaticConfig && a.Restart.Method == RestartPoisonPill && a.Mode != ModeFull},
+		{"restart.signal_file", a.Restart.SignalFile, a.UsesRestart() && a.Restart.Method == RestartPoisonPill && a.Mode != ModeFull},
 		{"config.path", a.Config.Path, (a.Mode == ModeTMNative || a.Mode == ModeFullNative) && a.Config.Layout == LayoutSingle},
 		{"config.dir", a.Config.Dir, (a.Mode == ModeTMNative || a.Mode == ModeFullNative) && a.Config.Layout == LayoutDirectory},
 		{"native.install_dir", a.Native.InstallDir, a.Mode == ModeTMNative || a.Mode == ModeFullNative},

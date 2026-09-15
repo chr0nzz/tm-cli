@@ -53,9 +53,10 @@ func renderFull(a *answers.Answers, plan BouncerPlan) (*Output, error) {
 
 func newFullView(a *answers.Answers) fullView {
 	static := a.Mounts.StaticConfig
-	proxy := static && a.Restart.Method == answers.RestartProxy
-	pill := static && a.Restart.Method == answers.RestartPoisonPill
-	socket := static && a.Restart.Method == answers.RestartSocket
+	restart := a.UsesRestart()
+	proxy := restart && a.Restart.Method == answers.RestartProxy
+	pill := restart && a.Restart.Method == answers.RestartPoisonPill
+	socket := restart && a.Restart.Method == answers.RestartSocket
 	tls := a.TLS.Method != answers.TLSNone
 	single := a.Config.Layout == answers.LayoutSingle
 	install := a.CrowdSec.Mode == answers.CrowdSecInstall
@@ -93,12 +94,12 @@ func newFullView(a *answers.Answers) fullView {
 
 	v.TraefikLabels = append(routerLabels("dashboard", a.Hosts.Dashboard, a.EntryPoint()), "traefik.http.routers.dashboard.service=api@internal")
 	v.TraefikLabels = append(v.TraefikLabels, tlsLabel("dashboard", tls)...)
-	if static {
-		v.TraefikLabels = append(v.TraefikLabels,
-			"traefik-manager.role=traefik",
-			"traefik-manager.static-config=/app/traefik.yml",
-			"traefik-manager.restart-method="+a.Restart.Method,
-		)
+	if restart {
+		v.TraefikLabels = append(v.TraefikLabels, "traefik-manager.role=traefik")
+		if static {
+			v.TraefikLabels = append(v.TraefikLabels, "traefik-manager.static-config=/app/traefik.yml")
+		}
+		v.TraefikLabels = append(v.TraefikLabels, "traefik-manager.restart-method="+a.Restart.Method)
 	}
 
 	v.TMNetworks = []string{a.Network.Name}
@@ -114,13 +115,13 @@ func newFullView(a *answers.Answers) fullView {
 		v.TMVolumes = append(v.TMVolumes, "./traefik/logs:/app/logs:ro")
 	}
 	if a.Mounts.Certs {
-		v.TMVolumes = append(v.TMVolumes, "./traefik/acme.json:/app/acme.json:ro")
+		v.TMVolumes = append(v.TMVolumes, "./traefik/acme.json:/app/acme.json"+acmeMountMode(a))
 	}
 	if static {
 		v.TMVolumes = append(v.TMVolumes, "./traefik/traefik.yml:/app/traefik.yml")
-		if pill {
-			v.TMVolumes = append(v.TMVolumes, "tm-signals:/signals")
-		}
+	}
+	if pill {
+		v.TMVolumes = append(v.TMVolumes, "tm-signals:/signals")
 	}
 	if single {
 		v.TMVolumes = append(v.TMVolumes, "./traefik/config/dynamic.yml:/app/config/dynamic.yml")
@@ -148,8 +149,10 @@ func tmEnv(a *answers.Answers, static, proxy, pill, single bool) []string {
 		env = append(env, "CONFIG_DIR=/app/config/dynamic")
 	}
 	if static {
+		env = append(env, "STATIC_CONFIG_PATH=/app/traefik.yml")
+	}
+	if a.UsesRestart() {
 		env = append(env,
-			"STATIC_CONFIG_PATH=/app/traefik.yml",
 			"RESTART_METHOD="+a.Restart.Method,
 			"TRAEFIK_CONTAINER="+a.Restart.Container,
 		)
@@ -160,6 +163,13 @@ func tmEnv(a *answers.Answers, static, proxy, pill, single bool) []string {
 		}
 	}
 	return env
+}
+
+func acmeMountMode(a *answers.Answers) string {
+	if a.Mounts.CertsWritable {
+		return ":rw"
+	}
+	return ":ro"
 }
 
 func tmLabels(a *answers.Answers) []string {

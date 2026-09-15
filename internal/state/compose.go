@@ -118,20 +118,22 @@ func (l kvList) truthy(key string) bool {
 }
 
 type mount struct {
-	Source string
-	Target string
+	Source   string
+	Target   string
+	ReadOnly bool
 }
 
 func (m *mount) UnmarshalYAML(n *yaml.Node) error {
 	if n.Kind == yaml.MappingNode {
 		var long struct {
-			Source string `yaml:"source"`
-			Target string `yaml:"target"`
+			Source   string `yaml:"source"`
+			Target   string `yaml:"target"`
+			ReadOnly bool   `yaml:"read_only"`
 		}
 		if err := n.Decode(&long); err != nil {
 			return err
 		}
-		m.Source, m.Target = long.Source, long.Target
+		m.Source, m.Target, m.ReadOnly = long.Source, long.Target, long.ReadOnly
 		return nil
 	}
 	parts := strings.Split(n.Value, ":")
@@ -139,6 +141,13 @@ func (m *mount) UnmarshalYAML(n *yaml.Node) error {
 		m.Source, m.Target = parts[0], parts[1]
 	} else {
 		m.Target = parts[0]
+	}
+	if len(parts) >= 3 {
+		for _, opt := range strings.Split(parts[2], ",") {
+			if opt == "ro" {
+				m.ReadOnly = true
+			}
+		}
 	}
 	return nil
 }
@@ -295,6 +304,19 @@ func (s *service) mountSource(target string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+func (s *service) mountWritable(target string) bool {
+	if s == nil {
+		return false
+	}
+	want := path.Clean(target)
+	for _, m := range s.Volumes {
+		if m.Target != "" && path.Clean(m.Target) == want {
+			return !m.ReadOnly
+		}
+	}
+	return false
 }
 
 func (s *service) hostPort(container string) string {

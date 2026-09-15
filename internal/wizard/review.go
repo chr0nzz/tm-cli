@@ -66,10 +66,14 @@ func fnoValue(a *answers.Answers, id string) string {
 	case "config":
 		return layoutValue(a)
 	case "mounts":
-		if !a.Mounts.StaticConfig {
-			return "static editor off"
+		v := "static editor off"
+		if a.Mounts.StaticConfig {
+			v = "static editor on (restart:" + a.Restart.Method + ")"
 		}
-		return "static editor on (restart:" + a.Restart.Method + ")"
+		if a.Mounts.CertsWritable {
+			v += "  cert removal on"
+		}
+		return v
 	case "crowdsec":
 		return crowdsecValue(a)
 	}
@@ -176,7 +180,9 @@ func agentValue(a *answers.Answers, id string) string {
 		return v
 	case "paths":
 		var p []string
-		if a.Mounts.Certs {
+		if a.Mounts.CertsWritable {
+			p = append(p, "acme(rw)")
+		} else if a.Mounts.Certs {
 			p = append(p, "acme")
 		}
 		if a.Mounts.AccessLogs {
@@ -252,12 +258,16 @@ func mountsValue(a *answers.Answers, order ...string) string {
 		if k == "logs" && a.Mounts.AccessLogs {
 			m = append(m, "logs")
 		}
-		if k == "certs" && a.Mounts.Certs {
+		if k == "certs" && a.Mounts.CertsWritable {
+			m = append(m, "certs(rw)")
+		} else if k == "certs" && a.Mounts.Certs {
 			m = append(m, "certs")
 		}
 	}
 	if a.Mounts.StaticConfig {
 		m = append(m, "static(restart:"+a.Restart.Method+")")
+	} else if a.Mounts.CertsWritable {
+		m = append(m, "restart:"+a.Restart.Method)
 	}
 	if len(m) == 0 {
 		return "(none)"

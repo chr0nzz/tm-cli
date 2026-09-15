@@ -118,7 +118,7 @@ func (in *Installer) Services(ctx context.Context, st *state.State) []ServiceSta
 	case answers.ModeFullNative:
 		out = append(out, ServiceStatus{Name: traefikUnit + ".service", Status: unitStatus(ctx, traefikUnit)})
 		out = append(out, ServiceStatus{Name: nativeUnit + ".service", Status: unitStatus(ctx, nativeUnit)})
-		if a.Mounts.StaticConfig {
+		if a.UsesRestart() {
 			out = append(out, ServiceStatus{Name: restartPathUnit, Status: unitStatus(ctx, restartPathUnit)})
 		}
 	case answers.ModeTMNative:

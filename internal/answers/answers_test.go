@@ -648,3 +648,93 @@ func TestBouncerPluginRoundTrips(t *testing.T) {
 		t.Fatalf("the default is omitted from answers files:\n%s", data)
 	}
 }
+
+func certAnswers(mode Mode) *Answers {
+	a := Defaults(mode)
+	a.Domain = "example.com"
+	a.Hosts.Manager = "manager.example.com"
+	a.TLS.Email = "me@example.com"
+	a.Mounts.Certs = true
+	a.Mounts.CertsWritable = true
+	return a
+}
+
+func TestCertRemovalNeedsARestartMethod(t *testing.T) {
+	a := certAnswers(ModeTMDocker)
+	a.Finalize()
+	if err := a.Validate(); err == nil || !strings.Contains(err.Error(), "mounts.certs_writable") {
+		t.Fatalf("certificate removal without a restart method must be rejected, got %v", err)
+	}
+	a.Restart.Method = RestartProxy
+	a.Finalize()
+	if err := a.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if a.Restart.Method != RestartProxy {
+		t.Fatalf("the restart method was cleared without a static config: %+v", a.Restart)
+	}
+	b := certAnswers(ModeAgentDocker)
+	b.SetSecret(SecretTMAAPIKey, "k")
+	b.Finalize()
+	if err := b.Validate(); err == nil || !strings.Contains(err.Error(), "mounts.certs_writable") {
+		t.Fatalf("an agent without a restart method must be rejected, got %v", err)
+	}
+}
+
+func TestCertRemovalNeedsCerts(t *testing.T) {
+	a := certAnswers(ModeTMDocker)
+	a.Mounts.Certs = false
+	a.Restart.Method = RestartProxy
+	a.Finalize()
+	if a.Mounts.CertsWritable || a.Restart.Method != RestartNone {
+		t.Fatalf("certificate removal survived an unmounted acme.json: %+v %+v", a.Mounts, a.Restart)
+	}
+	f := certAnswers(ModeFullNative)
+	f.Finalize()
+	if !f.Mounts.CertsWritable || f.Restart.Method != RestartPoisonPill || !f.Restart.TraefikSystemd {
+		t.Fatalf("full-native certificate removal needs the restart watcher: %+v %+v", f.Mounts, f.Restart)
+	}
+	f.TLS = TLS{Method: TLSNone}
+	f.Finalize()
+	if f.Mounts.CertsWritable || f.Restart.Method != RestartNone {
+		t.Fatalf("full-native without TLS has no acme.json: %+v %+v", f.Mounts, f.Restart)
+	}
+}
+
+func TestCertRemovalIsNotOfferedForTMNative(t *testing.T) {
+	a := certAnswers(ModeTMNative)
+	a.Finalize()
+	if err := a.Validate(); err == nil || !strings.Contains(err.Error(), "tm-native") {
+		t.Fatalf("tm-native must refuse certificate removal, got %v", err)
+	}
+}
+
+func TestCertRemovalRoundTrips(t *testing.T) {
+	a := certAnswers(ModeFull)
+	a.Restart.Method = RestartPoisonPill
+	a.Finalize()
+	data, err := a.Dump()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "certs_writable: true") {
+		t.Fatalf("certs_writable missing from the dump:\n%s", data)
+	}
+	back, err := Parse(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !back.Mounts.CertsWritable || back.Restart.Method != RestartPoisonPill {
+		t.Fatalf("certificate removal did not survive a round trip: %+v %+v", back.Mounts, back.Restart)
+	}
+	off := certAnswers(ModeFull)
+	off.Mounts.CertsWritable = false
+	off.Finalize()
+	data, err = off.Dump()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "certs_writable") {
+		t.Fatalf("the default is omitted from answers files:\n%s", data)
+	}
+}

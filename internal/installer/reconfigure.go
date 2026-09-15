@@ -140,18 +140,18 @@ func (in *Installer) Reconfigure(ctx context.Context, st *state.State, edit func
 				return err
 			}
 		}
-		if a.Mounts.StaticConfig {
+		if a.UsesRestart() {
 			_ = host.MkdirAll(filepath.Dir(a.Restart.SignalFile), 0o755)
 			_ = host.Chown(filepath.Dir(a.Restart.SignalFile), nativeUser+":", true)
 		}
 		if err := host.Systemctl(ctx, "daemon-reload"); err != nil {
 			return err
 		}
-		if a.Mounts.StaticConfig {
+		if a.UsesRestart() {
 			if err := host.Systemctl(ctx, "enable", "--now", restartPathUnit); err != nil {
 				return err
 			}
-		} else if prev.Mounts.StaticConfig {
+		} else if prev.UsesRestart() {
 			_ = host.Systemctl(ctx, "disable", "--now", restartPathUnit)
 			_ = host.Remove("/etc/systemd/system/"+restartPathUnit, false)
 			_ = host.Remove("/etc/systemd/system/traefik-restart.service", false)

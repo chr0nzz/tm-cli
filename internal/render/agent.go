@@ -163,7 +163,7 @@ func renderAgentDocker(a *answers.Answers, plan BouncerPlan) (*Output, error) {
 		v.Volumes = append(v.Volumes, p.Static+":"+p.Static)
 	}
 	if p.Acme != "" {
-		v.Volumes = append(v.Volumes, p.Acme+":"+p.Acme+":ro")
+		v.Volumes = append(v.Volumes, p.Acme+":"+p.Acme+acmeMountMode(a))
 	}
 	if p.Log != "" {
 		v.Volumes = append(v.Volumes, p.Log+":"+p.Log+":ro")
@@ -262,7 +262,7 @@ func renderAgentDockerTraefik(a *answers.Answers, plan BouncerPlan) (*Output, er
 	}
 	v.Volumes = append(v.Volumes, "./backups:/app/backups", "./traefik/logs/access.log:"+traefikAccessLog+":ro")
 	if tls {
-		v.Volumes = append(v.Volumes, "./traefik/acme.json:"+traefikAcmeJSON+":ro")
+		v.Volumes = append(v.Volumes, "./traefik/acme.json:"+traefikAcmeJSON+acmeMountMode(a))
 	}
 	if p.Plugins != "" {
 		v.Volumes = append(v.Volumes, p.Plugins+":"+p.Plugins+":ro")
