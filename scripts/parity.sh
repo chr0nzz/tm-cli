@@ -585,6 +585,13 @@ compare_systemd_tree() {
     if quote_unit_values "$norm$path"; then
       note_dev "$name: $path values are quoted for systemd"
     fi
+    if [[ "$path" == /etc/systemd/system/traefik-manager.service ]]; then
+      note_dev "$name: $path reads workers and log level from gunicorn.conf.py instead of pinning one worker"
+      sed -e '/^    --workers 1 \\$/d' -e '/^    --log-level info \\$/d' \
+          -e 's|^ExecStart="\(.*\)/venv/bin/gunicorn" \\$|&\n    --config "\1/gunicorn.conf.py" \\|' \
+          "$norm$path" > "$norm$path.w"
+      mv "$norm$path.w" "$norm$path"
+    fi
     if [[ "$path" == /etc/systemd/system/tma.service ]]; then
       unit_keys="$(grep -o '^Environment="[A-Z_]*=[$][{][A-Z_]*}"$' "$norm$path" | sed 's/^Environment="//; s/=.*//' | sort)"
       env_keys="$(cut -d= -f1 "$dir/files/etc/traefik-manager-agent/env" | sort)"

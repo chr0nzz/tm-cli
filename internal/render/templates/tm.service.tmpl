@@ -11,9 +11,8 @@ EnvironmentFile={{ .EnvFile }}
 {{- end }}
 Environment={{ .HomeEnv }}
 ExecStart={{ .ExecStartArg }} \
+    --config {{ .ConfigFileArg }} \
     --bind 0.0.0.0:{{ .Port }} \
-    --workers 1 \
-    --log-level info \
     app:app
 Environment={{ .ConfigEnv }}
 Environment={{ .BackupEnv }}

@@ -9,9 +9,8 @@ WorkingDirectory=/opt/traefik-manager
 EnvironmentFile=/etc/traefik-manager/env
 Environment="HOME=/opt/traefik-manager"
 ExecStart="/opt/traefik-manager/venv/bin/gunicorn" \
+    --config "/opt/traefik-manager/gunicorn.conf.py" \
     --bind 0.0.0.0:5100 \
-    --workers 1 \
-    --log-level info \
     app:app
 Environment="CONFIG_PATH=/etc/traefik/dynamic/dynamic.yml"
 Environment="BACKUP_DIR=/var/lib/traefik-manager/backups"

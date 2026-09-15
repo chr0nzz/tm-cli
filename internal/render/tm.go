@@ -100,30 +100,32 @@ func newTMView(a *answers.Answers) tmView {
 }
 
 type nativeView struct {
-	User         string
-	InstallDir   string
-	ExecStartArg string
-	HomeEnv      string
-	BackupEnv    string
-	SettingsEnv  string
-	DataDir      string
-	Port         string
-	ConfigEnv    string
-	EnvFile      string
-	OptionalEnv  []string
+	User          string
+	InstallDir    string
+	ExecStartArg  string
+	ConfigFileArg string
+	HomeEnv       string
+	BackupEnv     string
+	SettingsEnv   string
+	DataDir       string
+	Port          string
+	ConfigEnv     string
+	EnvFile       string
+	OptionalEnv   []string
 }
 
 func baseNativeView(a *answers.Answers) nativeView {
 	return nativeView{
-		User:         "traefik-manager",
-		InstallDir:   a.Native.InstallDir,
-		ExecStartArg: SystemdQuote(filepath.Join(a.Native.InstallDir, "venv", "bin", "gunicorn")),
-		HomeEnv:      SystemdQuote("HOME=" + a.Native.InstallDir),
-		BackupEnv:    SystemdQuote("BACKUP_DIR=" + filepath.Join(a.Native.DataDir, "backups")),
-		SettingsEnv:  SystemdQuote("SETTINGS_PATH=" + filepath.Join(a.Native.DataDir, "manager.yml")),
-		DataDir:      a.Native.DataDir,
-		Port:         a.Native.Port,
-		ConfigEnv:    nativeConfigEnv(a),
+		User:          "traefik-manager",
+		InstallDir:    a.Native.InstallDir,
+		ExecStartArg:  SystemdQuote(filepath.Join(a.Native.InstallDir, "venv", "bin", "gunicorn")),
+		ConfigFileArg: SystemdQuote(filepath.Join(a.Native.InstallDir, "gunicorn.conf.py")),
+		HomeEnv:       SystemdQuote("HOME=" + a.Native.InstallDir),
+		BackupEnv:     SystemdQuote("BACKUP_DIR=" + filepath.Join(a.Native.DataDir, "backups")),
+		SettingsEnv:   SystemdQuote("SETTINGS_PATH=" + filepath.Join(a.Native.DataDir, "manager.yml")),
+		DataDir:       a.Native.DataDir,
+		Port:          a.Native.Port,
+		ConfigEnv:     nativeConfigEnv(a),
 	}
 }
 
