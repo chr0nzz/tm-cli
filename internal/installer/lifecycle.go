@@ -59,6 +59,7 @@ func (in *Installer) Status(ctx context.Context, st *state.State) error {
 	} else {
 		u.KV("Binary", answers.AgentBinaryPath)
 	}
+	in.ensureTraefikVersion(ctx, st)
 	if st.TraefikVersion != "" {
 		u.KV("Traefik", st.TraefikVersion)
 	}

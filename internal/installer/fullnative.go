@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -102,7 +103,36 @@ func (in *Installer) updateFullNative(ctx context.Context, st *state.State) erro
 	if err := in.updateNative(ctx, &st.Answers); err != nil {
 		return err
 	}
+	in.ensureTraefikVersion(ctx, st)
 	return in.updateTraefikNative(ctx, st)
+}
+
+func (in *Installer) ensureTraefikVersion(ctx context.Context, st *state.State) {
+	if st.Mode != answers.ModeFullNative || st.TraefikVersion != "" {
+		return
+	}
+	st.TraefikVersion = traefikBinaryVersion(ctx)
+}
+
+func traefikBinaryVersion(ctx context.Context) string {
+	out, err := host.Output(host.Command(ctx, answers.TraefikBinaryPath, "version"))
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(out, "\n") {
+		v, ok := strings.CutPrefix(strings.TrimSpace(line), "Version:")
+		if !ok {
+			continue
+		}
+		if v = strings.TrimSpace(v); v == "" {
+			return ""
+		}
+		if !strings.HasPrefix(v, "v") {
+			v = "v" + v
+		}
+		return v
+	}
+	return ""
 }
 
 func (in *Installer) updateTraefikNative(ctx context.Context, st *state.State) error {

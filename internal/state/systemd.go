@@ -2,6 +2,7 @@ package state
 
 import (
 	"fmt"
+	"net/url"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -15,6 +16,7 @@ var (
 	agentUnitPath      = "/etc/systemd/system/tma.service"
 	restartPathUnit    = "/etc/systemd/system/traefik-restart.path"
 	restartServiceUnit = "/etc/systemd/system/traefik-restart.service"
+	crowdsecConfigDir  = "/etc/crowdsec"
 )
 
 var (
@@ -91,6 +93,8 @@ func inspectUnit(mode answers.Mode) (*State, map[string]string, error) {
 		applyAgentEnv(a, u.env, secrets)
 		a.Mounts.CertsWritable = a.Mounts.Certs && a.Restart.Method != answers.RestartNone
 	}
+	applyNativeCrowdSec(a, u.env)
+	envFileSecrets(u.first("EnvironmentFile"), secrets)
 	a.Finalize()
 	st := &State{
 		Version:     Version,
@@ -104,6 +108,73 @@ func inspectUnit(mode answers.Mode) (*State, map[string]string, error) {
 		Path:        PathFor(a),
 	}
 	return st, secrets, nil
+}
+
+func applyNativeCrowdSec(a *answers.Answers, env kvList) {
+	url, _ := env.get("CROWDSEC_LAPI_URL")
+	if url == "" {
+		a.CrowdSec.Mode = answers.CrowdSecNone
+		return
+	}
+	a.CrowdSec.Mode = answers.CrowdSecConnect
+	a.CrowdSec.LAPIURL = url
+	if v, ok := env.get("CROWDSEC_MACHINE_ID"); ok && v != "" {
+		a.CrowdSec.MachineID = v
+	}
+	if v, ok := env.get("CROWDSEC_ALERT_LIMIT"); ok && v != "" {
+		a.CrowdSec.AlertLimit = v
+	}
+	port, local := loopbackPort(url)
+	if !local || !exists(crowdsecConfigDir) {
+		return
+	}
+	a.CrowdSec.Mode = answers.CrowdSecInstall
+	if port != "" && port != answers.NativeLAPIPort {
+		a.CrowdSec.LAPIPort = port
+	}
+}
+
+func loopbackPort(raw string) (string, bool) {
+	u, err := url.Parse(strings.TrimRight(raw, "/"))
+	if err != nil {
+		return "", false
+	}
+	switch u.Hostname() {
+	case "127.0.0.1", "localhost", "::1":
+		return u.Port(), true
+	}
+	return "", false
+}
+
+func envFileSecrets(path string, secrets map[string]string) {
+	if path == "" {
+		return
+	}
+	data, err := readFile(path)
+	if err != nil {
+		return
+	}
+	wanted := map[string]bool{}
+	for _, k := range secretKeys {
+		wanted[k] = true
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		k, v, ok := strings.Cut(line, "=")
+		if !ok || !wanted[k] {
+			continue
+		}
+		v = strings.TrimSpace(v)
+		if len(v) > 1 && (v[0] == '\'' || v[0] == '"') && v[len(v)-1] == v[0] {
+			v = v[1 : len(v)-1]
+		}
+		if v != "" && !isReference(v) {
+			secrets[k] = v
+		}
+	}
 }
 
 func applyNativeUnit(a *answers.Answers, u *unit, owned map[string]string) {

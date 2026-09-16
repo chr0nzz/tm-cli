@@ -105,6 +105,81 @@ func TestAdoptSystemdNative(t *testing.T) {
 	}
 }
 
+func useCrowdSecDir(t *testing.T, dir string) {
+	t.Helper()
+	saved := crowdsecConfigDir
+	t.Cleanup(func() { crowdsecConfigDir = saved })
+	crowdsecConfigDir = dir
+}
+
+func TestAdoptSystemdNativeCrowdSecConnect(t *testing.T) {
+	dir := unitSandbox(t)
+	useCrowdSecDir(t, filepath.Join(dir, "crowdsec"))
+	installUnit(t, "traefik-manager-crowdsec.service", nativeUnitPath)
+	st, _, err := AdoptSystemd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cs := st.Answers.CrowdSec
+	if cs.Mode != answers.CrowdSecConnect || cs.LAPIURL != "http://10.0.0.5:8080" || cs.MachineID != "traefik-manager" || cs.AlertLimit != "2500" {
+		t.Fatalf("crowdsec: %+v", cs)
+	}
+	if cs.LAPIPort != "" {
+		t.Fatalf("a remote lapi has no local port: %+v", cs)
+	}
+}
+
+func TestAdoptSystemdNativeCrowdSecInstall(t *testing.T) {
+	dir := unitSandbox(t)
+	csDir := filepath.Join(dir, "crowdsec")
+	useCrowdSecDir(t, csDir)
+	if err := os.MkdirAll(csDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	installUnit(t, "traefik-manager-crowdsec-local.service", nativeUnitPath)
+	st, _, err := AdoptSystemd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cs := st.Answers.CrowdSec
+	if cs.Mode != answers.CrowdSecInstall || cs.LAPIPort != "9090" || cs.LAPIURL != "http://127.0.0.1:9090" || cs.AlertLimit != "500" {
+		t.Fatalf("crowdsec: %+v", cs)
+	}
+}
+
+func TestAdoptSystemdNativeCrowdSecAbsent(t *testing.T) {
+	dir := unitSandbox(t)
+	useCrowdSecDir(t, filepath.Join(dir, "crowdsec"))
+	installUnit(t, "traefik-manager.service", nativeUnitPath)
+	st, _, err := AdoptSystemd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Answers.CrowdSec.Mode != answers.CrowdSecNone {
+		t.Fatalf("crowdsec: %+v", st.Answers.CrowdSec)
+	}
+}
+
+func TestEnvFileSecrets(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "env")
+	body := "# secrets\nCROWDSEC_API_KEY='key-1'\nCROWDSEC_MACHINE_PASSWORD=\"pw-2\"\nTMA_API_KEY=${TMA_API_KEY}\nNOT_A_SECRET=nope\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	envFileSecrets(path, got)
+	if got[answers.SecretCrowdSecAPIKey] != "key-1" || got[answers.SecretCrowdSecMachinePassword] != "pw-2" {
+		t.Fatalf("secrets not read: %+v", got)
+	}
+	if len(got) != 2 {
+		t.Fatalf("a reference or a non-secret leaked in: %+v", got)
+	}
+	envFileSecrets(filepath.Join(t.TempDir(), "missing"), got)
+	if len(got) != 2 {
+		t.Fatalf("a missing env file changed the secrets: %+v", got)
+	}
+}
+
 func TestAdoptSystemdNativePlain(t *testing.T) {
 	unitSandbox(t)
 	installUnit(t, "traefik-manager-plain.service", nativeUnitPath)

@@ -358,21 +358,14 @@ func existingInstall(a *answers.Answers, u *ui.UI) (*state.State, error) {
 		return state.Load(p)
 	}
 	switch a.Mode {
-	case answers.ModeTMNative:
+	case answers.ModeTMNative, answers.ModeFullNative:
 		if host.Exists("/etc/systemd/system/traefik-manager.service") {
 			st, _, err := state.AdoptSystemd()
-			if err == nil && st.Mode == answers.ModeTMNative {
+			if err == nil && (st.Mode == answers.ModeTMNative || st.Mode == answers.ModeFullNative) {
 				return st, nil
 			}
 		}
-	case answers.ModeFullNative:
-		if host.Exists("/etc/systemd/system/traefik-manager.service") {
-			st, _, err := state.AdoptSystemd()
-			if err == nil && st.Mode == answers.ModeTMNative {
-				return st, nil
-			}
-		}
-		if host.Exists("/etc/systemd/system/traefik.service") {
+		if a.Mode == answers.ModeFullNative && host.Exists("/etc/systemd/system/traefik.service") {
 			return nil, errors.New("a traefik.service systemd unit already exists on this host: remove it first, or install Traefik Manager alongside it with --mode tm-native")
 		}
 	case answers.ModeAgentBinary:
