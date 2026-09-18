@@ -32,11 +32,11 @@ The bootstrap is a 120-line POSIX sh script that:
 
 | Variable | Effect |
 |---|---|
-| `TM_VERSION=1.12.0` | Install that release instead of the latest |
+| `TM_VERSION=1.14.0` | Install that release instead of the latest |
 | `TM_INSTALL_ONLY=1` | Install `tm` and stop, without running `tm install` |
 
 ```bash
-curl -fsSL https://get-traefik.xyzlab.dev | TM_VERSION=1.12.0 bash
+curl -fsSL https://get-traefik.xyzlab.dev | TM_VERSION=1.14.0 bash
 curl -fsSL https://get-traefik.xyzlab.dev | bash -s -- --mode agent
 ```
 
