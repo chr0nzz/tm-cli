@@ -243,6 +243,8 @@ The Linux service keeps its record in `/etc/traefik-manager/tm-state.yml`, the b
 
 Full setup guide and configuration reference: [traefik-manager.xyzlab.dev/tm-cli](https://traefik-manager.xyzlab.dev/tm-cli)
 
+Questions, help and release news: [Discord](https://discord.gg/a6NKyJsfc)
+
 ---
 
 ## Related
