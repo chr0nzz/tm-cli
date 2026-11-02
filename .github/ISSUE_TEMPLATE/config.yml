@@ -3,3 +3,12 @@ contact_links:
   - name: Report an issue or request a feature
     url: https://github.com/chr0nzz/traefik-manager/issues/new/choose
     about: All issues and feature requests should be filed in the main traefik-manager repo
+  - name: Question or help with your setup
+    url: https://github.com/chr0nzz/traefik-manager/discussions/new?category=q-a
+    about: Not sure whether something is a bug? Ask here first.
+  - name: Security vulnerability
+    url: https://github.com/chr0nzz/tm-cli/security/advisories/new
+    about: Please report security issues privately using GitHub's vulnerability reporting.
+  - name: Documentation
+    url: https://traefik-manager.xyzlab.dev/tm-cli
+    about: Check the docs before opening an issue - your question may already be answered.

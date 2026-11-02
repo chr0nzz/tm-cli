@@ -247,6 +247,12 @@ Questions, help and release news: [Discord](https://discord.gg/vRQCMrrjtz)
 
 ---
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). All pull requests target `dev`. For security issues, see [SECURITY.md](.github/SECURITY.md).
+
+---
+
 ## Related
 
 - [Traefik](https://github.com/traefik/traefik) - the reverse proxy
