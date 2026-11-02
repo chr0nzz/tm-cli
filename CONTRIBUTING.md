@@ -127,7 +127,7 @@ setup.sh                      # The bootstrap behind the one-line install
         audit.yml             # govulncheck on dev, main, PRs and daily
         ci.yml                # Build, vet, tests, bootstrap smoke test and shellcheck
         pr-base-check.yml     # Fails a PR opened against main instead of dev
-        release.yml           # Builds the tm binaries on a published release
+        release.yml           # On a version tag: audit, tests, then build and publish the release
 ```
 
 ---
@@ -149,4 +149,4 @@ setup.sh                      # The bootstrap behind the one-line install
 | `dev` | Active development - all features, bug fixes, and docs changes for the next release | **Yes - every PR targets `dev`** |
 | `main` | Release branch - only moves when a version is tagged | **No - never open PRs here** |
 
-Everything lands on `dev` first - features, bug fixes, and docs alike. When `dev` is ready for release it is merged to `main` and tagged, and publishing the GitHub release builds the `tm` binaries. Nothing else touches `main`: a PR merged there would sit unreleased, drift out of sync with `dev`, and risk being clobbered by the next release merge.
+Everything lands on `dev` first - features, bug fixes, and docs alike. When `dev` is ready for release it is merged to `main` and tagged. The tag runs the dependency audit and the tests, and only if both pass does it build the `tm` binaries and publish the release. Nothing else touches `main`: a PR merged there would sit unreleased, drift out of sync with `dev`, and risk being clobbered by the next release merge.
