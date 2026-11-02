@@ -91,6 +91,12 @@ Please run these before opening a pull request. CI runs them too, along with a s
 TM_BOOTSTRAP_TEST=1 sh setup.sh
 ```
 
+A separate workflow fails on a dependency or Go version with a known vulnerability. If you update `go.mod`, run the same check:
+
+```bash
+go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 ./...
+```
+
 The files `tm` generates are compared against the scenarios in `testdata/golden`. If you change a template or what gets rendered, regenerate them and read the diff to confirm that only what you meant to change has changed:
 
 ```bash
@@ -118,6 +124,7 @@ scripts/parity.sh             # Compares generated files with the old bash insta
 setup.sh                      # The bootstrap behind the one-line install
 .github/
     workflows/
+        audit.yml             # govulncheck on dev, main, PRs and daily
         ci.yml                # Build, vet, tests, bootstrap smoke test and shellcheck
         pr-base-check.yml     # Fails a PR opened against main instead of dev
         release.yml           # Builds the tm binaries on a published release
