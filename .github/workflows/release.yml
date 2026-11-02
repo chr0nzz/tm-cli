@@ -1,36 +1,73 @@
 name: Release tm Binaries
 
 on:
-  release:
-    types: [published]
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: Existing release tag to attach the tm binaries to
-        required: true
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  build-binaries:
+  audit:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
-          ref: ${{ github.event.release.tag_name || inputs.tag }}
+          persist-credentials: false
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
+
+      - name: Fail on a dependency with a known vulnerability
+        run: govulncheck ./...
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test ./...
+
+  build-binaries:
+    needs: [audit, test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version-file: go.mod
 
       - name: Build tm binaries
-        env:
-          TAG: ${{ github.event.release.tag_name || inputs.tag }}
         run: |
-          version="${TAG#v}"
+          version="${GITHUB_REF_NAME#v}"
           commit="$(git rev-parse --short HEAD)"
           date="$(git show -s --format=%cs HEAD)"
           ldflags="-s -w -X main.version=${version} -X main.commit=${commit} -X main.date=${date}"
@@ -41,13 +78,19 @@ jobs:
           (cd dist && sha256sum tm-linux-* > SHA256SUMS)
           cat dist/SHA256SUMS
 
-      - name: Attach binaries to release
-        uses: softprops/action-gh-release@v2
+      - name: Attest the binaries
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
         with:
-          tag_name: ${{ github.event.release.tag_name || inputs.tag }}
-          files: |
-            dist/tm-linux-amd64
-            dist/tm-linux-arm64
-            dist/tm-linux-armv7
-            dist/SHA256SUMS
-          fail_on_unmatched_files: true
+          subject-path: dist/tm-linux-*
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" dist/tm-linux-* dist/SHA256SUMS --clobber
+            gh release edit "$GITHUB_REF_NAME" --draft=false --latest
+          else
+            gh release create "$GITHUB_REF_NAME" dist/tm-linux-* dist/SHA256SUMS --verify-tag --generate-notes --latest
+          fi

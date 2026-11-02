@@ -91,6 +91,12 @@ Please run these before opening a pull request. CI runs them too, along with a s
 TM_BOOTSTRAP_TEST=1 sh setup.sh
 ```
 
+A separate workflow fails on a dependency or Go version with a known vulnerability. If you update `go.mod`, run the same check:
+
+```bash
+go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 ./...
+```
+
 The files `tm` generates are compared against the scenarios in `testdata/golden`. If you change a template or what gets rendered, regenerate them and read the diff to confirm that only what you meant to change has changed:
 
 ```bash
@@ -118,9 +124,10 @@ scripts/parity.sh             # Compares generated files with the old bash insta
 setup.sh                      # The bootstrap behind the one-line install
 .github/
     workflows/
+        audit.yml             # govulncheck on dev, main, PRs and daily
         ci.yml                # Build, vet, tests, bootstrap smoke test and shellcheck
         pr-base-check.yml     # Fails a PR opened against main instead of dev
-        release.yml           # Builds the tm binaries on a published release
+        release.yml           # On a version tag: audit, tests, then build and publish the release
 ```
 
 ---
@@ -142,4 +149,4 @@ setup.sh                      # The bootstrap behind the one-line install
 | `dev` | Active development - all features, bug fixes, and docs changes for the next release | **Yes - every PR targets `dev`** |
 | `main` | Release branch - only moves when a version is tagged | **No - never open PRs here** |
 
-Everything lands on `dev` first - features, bug fixes, and docs alike. When `dev` is ready for release it is merged to `main` and tagged, and publishing the GitHub release builds the `tm` binaries. Nothing else touches `main`: a PR merged there would sit unreleased, drift out of sync with `dev`, and risk being clobbered by the next release merge.
+Everything lands on `dev` first - features, bug fixes, and docs alike. When `dev` is ready for release it is merged to `main` and tagged. The tag runs the dependency audit and the tests, and only if both pass does it build the `tm` binaries and publish the release. Nothing else touches `main`: a PR merged there would sit unreleased, drift out of sync with `dev`, and risk being clobbered by the next release merge.
