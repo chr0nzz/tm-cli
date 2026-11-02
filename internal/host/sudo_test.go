@@ -21,6 +21,7 @@ func fakeSudo(t *testing.T) func() []string {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("TMPDIR", t.TempDir())
 	orig := lookPath
 	lookPath = exec.LookPath
 	t.Cleanup(func() { lookPath = orig })
