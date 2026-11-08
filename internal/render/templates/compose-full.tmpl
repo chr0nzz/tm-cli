@@ -20,6 +20,9 @@ services:
 {{- if .TLS }}
       - "443:443"
 {{- end }}
+{{- if .HTTP3 }}
+      - "443:443/udp"
+{{- end }}
       - "{{ .APIPort }}:8080"
     volumes:
 {{- range .TraefikVolumes }}

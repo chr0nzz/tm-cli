@@ -207,6 +207,7 @@ type agentTraefikView struct {
 	SocketProxy     bool
 	PoisonPill      bool
 	TLS             bool
+	HTTP3           bool
 	TraefikVolumes  []string
 	DNSEnv          []string
 	TraefikLabels   []string
@@ -229,6 +230,7 @@ func renderAgentDockerTraefik(a *answers.Answers, plan BouncerPlan) (*Output, er
 		NetworkExternal: a.Network.External,
 		APIPort:         a.Network.TraefikAPIPort,
 		TLS:             tls,
+		HTTP3:           tls && a.TLS.HTTP3,
 		DNSEnv:          dnsEnv(a),
 		Port:            a.Agent.Port,
 		SocketProxy:     a.Restart.Method == answers.RestartProxy,

@@ -214,7 +214,7 @@ func agentValue(a *answers.Answers, id string) string {
 }
 
 func traefikInstallValue(a *answers.Answers) string {
-	v := orDefault(a.TLS.Method, answers.TLSNone)
+	v := orDefault(a.TLS.Method, answers.TLSNone) + http3Value(a)
 	if a.Deployment == answers.DeploymentExternal {
 		v += "  external"
 	} else {
@@ -240,9 +240,16 @@ func tlsValue(a *answers.Answers) string {
 	case answers.TLSNone:
 		return "none (HTTP only)"
 	case answers.TLSDNS:
-		return fmt.Sprintf("Let's Encrypt DNS (%s)  %s", legoProvider(a.TLS), a.TLS.Email)
+		return fmt.Sprintf("Let's Encrypt DNS (%s)  %s", legoProvider(a.TLS), a.TLS.Email) + http3Value(a)
 	}
-	return "Let's Encrypt HTTP  " + a.TLS.Email
+	return "Let's Encrypt HTTP  " + a.TLS.Email + http3Value(a)
+}
+
+func http3Value(a *answers.Answers) string {
+	if a.TLS.HTTP3 {
+		return "  HTTP/3"
+	}
+	return ""
 }
 
 func layoutValue(a *answers.Answers) string {

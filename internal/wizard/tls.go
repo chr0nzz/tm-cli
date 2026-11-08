@@ -50,7 +50,29 @@ func legoProvider(t answers.TLS) string {
 	return t.ProviderID()
 }
 
+const (
+	http3Ask        = "Enable HTTP/3 (QUIC)?"
+	http3InfoDocker = "Adds http3 to the websecure entrypoint and publishes 443/udp next to 443/tcp. Open 443/udp in any firewall in front of this server."
+	http3InfoNative = "Adds http3 to the websecure entrypoint. Traefik also listens on 443/udp, so open it in any firewall in front of this server."
+)
+
 func (w *wizard) tls() error {
+	if err := w.tlsMethod(); err != nil {
+		return err
+	}
+	a := w.a
+	if a.TLS.Method == answers.TLSNone {
+		a.TLS.HTTP3 = false
+		return nil
+	}
+	info := http3InfoDocker
+	if a.Mode == answers.ModeFullNative {
+		info = http3InfoNative
+	}
+	return w.groups(huh.NewGroup(confirm(http3Ask, &a.TLS.HTTP3)).Description(info))
+}
+
+func (w *wizard) tlsMethod() error {
 	a := w.a
 	choice := tlsChoice(a.TLS)
 	if err := w.form(selectOne("Certificate method", &choice, tlsOptions()...)); err != nil {
