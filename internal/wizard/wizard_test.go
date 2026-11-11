@@ -1,11 +1,13 @@
 package wizard
 
 import (
+	"bytes"
 	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/chr0nzz/tm-cli/internal/answers"
+	"github.com/chr0nzz/tm-cli/internal/ui"
 )
 
 func TestSectionsPerMode(t *testing.T) {
@@ -538,5 +540,33 @@ func TestReviewShowsTheBouncerPlugin(t *testing.T) {
 	b.Finalize()
 	if got := crowdsecValue(b); got != "connect  http://10.0.0.5:8080  bouncer plugin" {
 		t.Fatalf("review value = %q", got)
+	}
+}
+
+func TestFirewallNoticeListsUDPOnlyForHTTP3(t *testing.T) {
+	for _, http3 := range []bool{false, true} {
+		a := answers.Defaults(answers.ModeFull)
+		a.TLS.HTTP3 = http3
+		var out bytes.Buffer
+		FirewallNotice(ui.NewPlain(&out), a, false, nil)
+		text := out.String()
+		if !strings.Contains(text, "sudo ufw allow 443/tcp") {
+			t.Fatalf("http3=%v: 443/tcp missing:\n%s", http3, text)
+		}
+		if got := strings.Contains(text, "sudo ufw allow 443/udp"); got != http3 {
+			t.Fatalf("http3=%v: 443/udp listed = %v:\n%s", http3, got, text)
+		}
+	}
+}
+
+func TestReviewShowsHTTP3(t *testing.T) {
+	a := answers.Defaults(answers.ModeFull)
+	a.TLS.Email = "a@example.com"
+	if strings.Contains(tlsValue(a), "HTTP/3") {
+		t.Fatalf("HTTP/3 shown while off: %q", tlsValue(a))
+	}
+	a.TLS.HTTP3 = true
+	if !strings.Contains(tlsValue(a), "HTTP/3") {
+		t.Fatalf("HTTP/3 missing: %q", tlsValue(a))
 	}
 }

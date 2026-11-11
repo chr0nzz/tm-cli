@@ -193,6 +193,9 @@ func (in *Installer) summaryFullNative(a *answers.Answers) {
 		if a.TLS.Method != answers.TLSNone {
 			ports = "80/tcp and 443/tcp"
 		}
+		if a.TLS.Method != answers.TLSNone && a.TLS.HTTP3 {
+			ports = "80/tcp, 443/tcp and 443/udp"
+		}
 		u.Warn("Ports " + ports + " must be open on this server's firewall.")
 	}
 	if a.TLS.Method == answers.TLSNone {

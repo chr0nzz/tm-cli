@@ -106,6 +106,8 @@ crowdsec:
   mode: install
 ```
 
+`tls.http3: true` turns on HTTP/3: `http3: {}` on the `websecure` entrypoint, plus `443:443/udp` in the compose file for the Docker modes. It needs TLS and a mode that installs Traefik (`full`, `full-native`, `agent-docker-traefik`), and is off by default.
+
 `mounts.certs_writable: true` lets the Certs tab remove certificates: `acme.json` is mounted read-write and a `restart.method` is required, because Traefik only reads it at startup. Not available for `tm-native`.
 
 `tm install --dump-answers answers.yml` writes the answers of a wizard run to a file (no secrets) to start from. DNS providers: `cloudflare`, `route53`, `digitalocean`, `namecheap`, `duckdns`, `desec`, or `other` with `lego_provider`, `vars` and `secret_vars` for any other lego provider.

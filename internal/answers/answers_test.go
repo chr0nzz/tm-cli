@@ -142,6 +142,45 @@ func TestOtherProvider(t *testing.T) {
 	}
 }
 
+func TestParseReadsHTTP3(t *testing.T) {
+	a, err := Parse([]byte("mode: full\ndomain: example.com\ntls:\n  method: http\n  email: a@example.com\n  http3: true\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !a.TLS.HTTP3 {
+		t.Fatal("tls.http3 not read")
+	}
+	if Defaults(ModeFull).TLS.HTTP3 {
+		t.Fatal("http3 must be off by default")
+	}
+}
+
+func TestHTTP3NeedsTLSAndATraefikInstall(t *testing.T) {
+	cases := []struct {
+		mode Mode
+		tls  string
+		want bool
+	}{
+		{ModeFull, TLSHTTP, true},
+		{ModeFullNative, TLSHTTP, true},
+		{ModeAgentDockerTraefik, TLSHTTP, true},
+		{ModeFull, TLSNone, false},
+		{ModeAgentDockerTraefik, TLSNone, false},
+		{ModeTMDocker, TLSHTTP, false},
+		{ModeTMNative, TLSHTTP, false},
+		{ModeAgentDocker, TLSHTTP, false},
+	}
+	for _, c := range cases {
+		a := Defaults(c.mode)
+		a.TLS.Method = c.tls
+		a.TLS.HTTP3 = true
+		a.Finalize()
+		if a.TLS.HTTP3 != c.want {
+			t.Fatalf("%s with tls %s: http3 = %v, want %v", c.mode, c.tls, a.TLS.HTTP3, c.want)
+		}
+	}
+}
+
 func TestModesWithoutTLSValidate(t *testing.T) {
 	for _, m := range []Mode{ModeTMNative, ModeAgentDocker, ModeAgentBinary} {
 		a := Defaults(m)

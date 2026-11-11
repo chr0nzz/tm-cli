@@ -478,6 +478,9 @@ func FirewallNotice(u *ui.UI, a *answers.Answers, wait bool, in *os.File) {
 	if tls {
 		u.Line("  %s   HTTP (redirects to HTTPS + ACME HTTP-01 challenge)", ui.AccentStyle.Render("80/tcp"))
 		u.Line("  %s  HTTPS", ui.AccentStyle.Render("443/tcp"))
+		if a.TLS.HTTP3 {
+			u.Line("  %s  HTTP/3", ui.AccentStyle.Render("443/udp"))
+		}
 	} else {
 		u.Line("  %s   HTTP", ui.AccentStyle.Render("80/tcp"))
 	}
@@ -485,6 +488,9 @@ func FirewallNotice(u *ui.UI, a *answers.Answers, wait bool, in *os.File) {
 	u.Code("sudo ufw allow 80/tcp")
 	if tls {
 		u.Code("sudo ufw allow 443/tcp")
+	}
+	if tls && a.TLS.HTTP3 {
+		u.Code("sudo ufw allow 443/udp")
 	}
 	u.Code("sudo ufw reload")
 	u.Blank()

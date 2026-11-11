@@ -13,6 +13,9 @@ entryPoints:
           scheme: https
   websecure:
     address: ":443"
+{{- if .HTTP3 }}
+    http3: {}
+{{- end }}
 {{- end }}
 {{- if .APIAddress }}
   traefik:
