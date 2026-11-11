@@ -106,6 +106,12 @@ func (in *Installer) checks(st *state.State) []Check {
 				v, ok := host.PythonVersion()
 				return ok, v
 			}},
+			Check{Name: "python venv module", Run: func(ctx context.Context) (bool, string) {
+				if host.PythonHasVenv() {
+					return true, ""
+				}
+				return false, host.PythonVenvMissing().Error()
+			}},
 			Check{Name: "git installed", Run: func(ctx context.Context) (bool, string) {
 				return host.HasCommand("git"), ""
 			}},

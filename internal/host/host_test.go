@@ -89,6 +89,17 @@ func TestPythonOK(t *testing.T) {
 	}
 }
 
+func TestPythonVenvError(t *testing.T) {
+	if got := pythonVenvError("apt-get").Error(); !strings.Contains(got, "sudo apt install python3-venv") {
+		t.Errorf("apt-get hint = %q, want the apt install command", got)
+	}
+	for _, pm := range []string{"dnf", "pacman", ""} {
+		if got := pythonVenvError(pm).Error(); strings.Contains(got, "apt") {
+			t.Errorf("%q hint = %q, should not mention apt", pm, got)
+		}
+	}
+}
+
 func TestNeedsPrivilege(t *testing.T) {
 	dir := t.TempDir()
 	if NeedsPrivilege(dir) {

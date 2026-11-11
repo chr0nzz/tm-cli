@@ -3,6 +3,7 @@ package host
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -91,6 +92,25 @@ func PythonVersion() (string, bool) {
 		return "", false
 	}
 	return out, pythonOK(out)
+}
+
+func PythonHasVenv() bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	_, err := Output(Command(ctx, "python3", "-c", "import venv, ensurepip"))
+	return err == nil
+}
+
+func PythonVenvMissing() error {
+	pm, _ := PackageManager()
+	return pythonVenvError(pm)
+}
+
+func pythonVenvError(pm string) error {
+	if pm == "apt-get" {
+		return errors.New("python3-venv is required. Install it (sudo apt install python3-venv) and re-run")
+	}
+	return errors.New("the Python venv module with ensurepip is required. Install it and re-run")
 }
 
 func pythonOK(version string) bool {
