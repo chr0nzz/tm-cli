@@ -201,3 +201,92 @@ func TestResolveNothing(t *testing.T) {
 		t.Fatalf("expected guidance, got %v", err)
 	}
 }
+
+func savedNativeInDir(t *testing.T, dir string) *State {
+	t.Helper()
+	orig := nativeStatePath
+	t.Cleanup(func() { nativeStatePath = orig })
+	nativeStatePath = filepath.Join(t.TempDir(), "etc", "traefik-manager", "tm-state.yml")
+	a := answers.Defaults(answers.ModeFullNative)
+	a.Native.InstallDir = dir
+	a.Domain = "example.com"
+	a.TLS.Email = "me@example.com"
+	a.Finalize()
+	st := New(a, "1.15.0", "")
+	if err := st.Save(); err != nil {
+		t.Fatal(err)
+	}
+	return st
+}
+
+func TestResolveNativeInstallDirIsNotAdopted(t *testing.T) {
+	isolate(t)
+	dir := copyFixture(t, "tm-docker")
+	native := savedNativeInDir(t, dir)
+	t.Chdir(t.TempDir())
+	st, err := Resolve(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Mode != answers.ModeFullNative || st.Path != native.Path || st.Adopted {
+		t.Fatalf("--dir on the native install dir must load the native state, got %s %s adopted=%v", st.Mode, st.Path, st.Adopted)
+	}
+	t.Chdir(dir)
+	st, err = Resolve("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Mode != answers.ModeFullNative || st.Path != native.Path {
+		t.Fatalf("running inside the native install dir must load the native state, got %s %s", st.Mode, st.Path)
+	}
+}
+
+func TestResolveNativeStateWithoutRegistry(t *testing.T) {
+	isolate(t)
+	dir := copyFixture(t, "tm-docker")
+	native := savedNativeInDir(t, dir)
+	if err := os.WriteFile(os.Getenv("TM_REGISTRY"), []byte("installs: []\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	st, err := Resolve(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Path != native.Path {
+		t.Fatalf("the native state file must be found even when the registry does not list it, got %s", st.Path)
+	}
+}
+
+func TestResolveNativeWinsOverStaleAdoptedState(t *testing.T) {
+	isolate(t)
+	dir := copyFixture(t, "tm-docker")
+	adopted, err := Resolve(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := adopted.Save(); err != nil {
+		t.Fatal(err)
+	}
+	native := savedNativeInDir(t, dir)
+	st, err := Resolve(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Path != native.Path {
+		t.Fatalf("a stale adopted state in the native install dir must not win, got %s %s", st.Mode, st.Path)
+	}
+}
+
+func TestResolveOwnStateBeatsNativeWithSameDir(t *testing.T) {
+	isolate(t)
+	dir := t.TempDir()
+	own := savedInstall(t, answers.ModeFull, dir)
+	savedNativeInDir(t, dir)
+	st, err := Resolve(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Path != own.Path {
+		t.Fatalf("a state tm wrote into the dir itself must still win, got %s", st.Path)
+	}
+}

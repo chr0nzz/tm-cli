@@ -32,11 +32,11 @@ The bootstrap is a 120-line POSIX sh script that:
 
 | Variable | Effect |
 |---|---|
-| `TM_VERSION=1.15.0` | Install that release instead of the latest |
+| `TM_VERSION=1.15.1` | Install that release instead of the latest |
 | `TM_INSTALL_ONLY=1` | Install `tm` and stop, without running `tm install` |
 
 ```bash
-curl -fsSL https://get-traefik.xyzlab.dev | TM_VERSION=1.15.0 bash
+curl -fsSL https://get-traefik.xyzlab.dev | TM_VERSION=1.15.1 bash
 curl -fsSL https://get-traefik.xyzlab.dev | bash -s -- --mode agent
 ```
 
@@ -105,6 +105,8 @@ restart:
 crowdsec:
   mode: install
 ```
+
+`tls.http3: true` turns on HTTP/3: `http3: {}` on the `websecure` entrypoint, plus `443:443/udp` in the compose file for the Docker modes. It needs TLS and a mode that installs Traefik (`full`, `full-native`, `agent-docker-traefik`), and is off by default.
 
 `mounts.certs_writable: true` lets the Certs tab remove certificates: `acme.json` is mounted read-write and a `restart.method` is required, because Traefik only reads it at startup. Not available for `tm-native`.
 

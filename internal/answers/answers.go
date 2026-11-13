@@ -134,6 +134,7 @@ type TLS struct {
 	Email        string            `yaml:"email,omitempty"`
 	Vars         map[string]string `yaml:"vars,omitempty"`
 	SecretVars   []string          `yaml:"secret_vars,omitempty"`
+	HTTP3        bool              `yaml:"http3,omitempty"`
 }
 
 func (t TLS) ProviderID() string {
@@ -385,6 +386,9 @@ func (a *Answers) Finalize() {
 	}
 	if a.TLS.Method == TLSNone {
 		a.TLS.Email = ""
+	}
+	if a.TLS.Method == TLSNone || !a.Mode.HasTraefik() {
+		a.TLS.HTTP3 = false
 	}
 	a.finalizeCertRemoval()
 	switch a.Mode {

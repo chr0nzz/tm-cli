@@ -330,6 +330,7 @@ type traefikView struct {
 	DynamicDir  string
 	AcmeStorage string
 	AccessLog   string
+	HTTP3       bool
 	Plugin      *pluginView
 }
 
@@ -347,6 +348,7 @@ func newTraefikView(a *answers.Answers, plan BouncerPlan) traefikView {
 		DynamicDir:  "/etc/traefik/config",
 		AcmeStorage: "/acme.json",
 		AccessLog:   "/logs/access.log",
+		HTTP3:       a.TLS.HTTP3 && a.TLS.Method != answers.TLSNone,
 	}
 	if plan.Enabled {
 		v.Plugin = newPluginView(plan)

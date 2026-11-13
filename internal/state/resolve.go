@@ -101,8 +101,19 @@ func Resolve(dirFlag string) (*State, error) {
 
 func resolveDir(dir string) (*State, error) {
 	p := filepath.Join(dir, ".tm", "state.yml")
+	var local *State
 	if exists(p) {
-		return Load(p)
+		st, err := Load(p)
+		if err != nil || !st.Adopted {
+			return st, err
+		}
+		local = st
+	}
+	if st := installForDir(dir, p); st != nil {
+		return st, nil
+	}
+	if local != nil {
+		return local, nil
 	}
 	if exists(filepath.Join(dir, composeFileName)) {
 		st, _, err := Adopt(dir)
@@ -114,4 +125,32 @@ func resolveDir(dir string) (*State, error) {
 		}
 	}
 	return nil, errNothingHere
+}
+
+func installForDir(dir, skip string) *State {
+	paths, _ := Registry()
+	paths = dedup(append(paths, nativeStatePath, agentBinaryStatePath))
+	for _, p := range paths {
+		if p == skip || !exists(p) {
+			continue
+		}
+		st, err := Load(p)
+		if err != nil || st.Dir == "" {
+			continue
+		}
+		if sameDir(st.Dir, dir) {
+			return st
+		}
+	}
+	return nil
+}
+
+func sameDir(a, b string) bool {
+	a, b = filepath.Clean(expandDir(a)), filepath.Clean(expandDir(b))
+	if a == b {
+		return true
+	}
+	ra, errA := filepath.EvalSymlinks(a)
+	rb, errB := filepath.EvalSymlinks(b)
+	return errA == nil && errB == nil && ra == rb
 }

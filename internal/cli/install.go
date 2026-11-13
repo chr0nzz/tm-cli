@@ -290,6 +290,10 @@ func preflightTools(ctx context.Context, u *ui.UI, a *answers.Answers, yes, inte
 			return fmt.Errorf("python 3.11 or newer is required. Found: %s", v)
 		}
 		u.OK("Python " + v + " found")
+		if !host.PythonHasVenv() {
+			return host.PythonVenvMissing()
+		}
+		u.OK("Python venv module found")
 		if !host.HasCommand("systemctl") {
 			return errors.New("systemd is required for the Linux service install")
 		}

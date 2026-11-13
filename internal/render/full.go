@@ -12,6 +12,7 @@ type fullView struct {
 	PoisonPill      bool
 	NamedVolumes    []string
 	TLS             bool
+	HTTP3           bool
 	APIPort         string
 	TraefikVolumes  []string
 	DNSEnv          []string
@@ -67,6 +68,7 @@ func newFullView(a *answers.Answers) fullView {
 		SocketProxy:     proxy,
 		PoisonPill:      pill,
 		TLS:             tls,
+		HTTP3:           tls && a.TLS.HTTP3,
 		APIPort:         a.Network.TraefikAPIPort,
 		DNSEnv:          dnsEnv(a),
 	}
